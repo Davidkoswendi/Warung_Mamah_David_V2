@@ -53,7 +53,7 @@ const MENU = [
     { name: 'Steak Chicken',     img: 'img/steak-chicken.jpg' },
     { name: 'Chicken Katsu',     img: 'img/chicken-katsu.jpg' },
     { name: 'Chicken Cheese',    img: 'img/chicken-cheese.jpg' },
-    { name: 'Kebab',             img: 'img/kebab.jpg' },
+    { name: 'Kebab',             img: 'img/Kebab.jpg' },
     { name: 'Baso Bakar',        img: 'img/baso-bakar.jpg' },
     { name: 'Topoki',            img: 'img/topoki.jpg' }
   ].map((item, i) => ({
