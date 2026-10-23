@@ -46,6 +46,19 @@ const MENU = [
     toppings: TOP,
     flavors: []
   },
+    {
+    id: 'm2b',
+    name: 'Baso Kuah',
+    price: 6000,
+    cat: 'Menu Serba 6000',
+    type: 'normal',
+    desc: 'Baso sapi kuah gurih, hangat dan mantap.',
+    available: false,
+    upcoming: true,
+    img: 'img/baso-kuah.jpg',
+    toppings: [],
+    flavors: []
+  },
   ...[
     { name: 'Spaghetti Chicken', img: 'img/spaghetti-chicken.jpg' },
     { name: 'Pasta Macaroni',    img: 'img/pasta-macaroni.jpg' },
@@ -260,11 +273,24 @@ function openCheckout() {
   const f = $('#checkoutForm'); f.reset();
   $('#addrWrap').hidden = true; $('#qrBox').hidden = true;
   const last = load('wp_buyer', null); if (last) { f.name.value = last.name; f.phone.value = last.phone; }
+  const now = new Date(), pad = n => String(n).padStart(2, '0');
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  f.date.min = today; f.date.value = today;
+  f.time.value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+  f.dataset.dtTouched = '';
+  $('#dateWord').textContent = $('#timeWord').textContent = 'ambil';
   $('#sumBox').innerHTML = '<b>Ringkasan</b>' + cart.map(c => {
     const m = menu.find(x => x.id === c.id);
     return `<div class="ln"><span>${c.qty}× ${esc(m.name)}${optText(c) ? ` <small>(${esc(optText(c))})</small>` : ''}</span><span>${rp(itemPrice(c) * c.qty)}</span></div>`;
   }).join('') + `<div class="ln tot"><span>Total</span><span>${rp(cartTotal())}</span></div>`;
   openM('m-checkout');
+}
+
+function fmtSchedule(date, time) {
+  const [y, m, d] = String(date).split('-').map(Number);
+  const dt = new Date(y, (m || 1) - 1, d || 1);
+  const ds = dt.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
+  return `${ds}, pukul ${String(time).replace(':', '.')}`;
 }
 
 function buildOrderText(o) {
@@ -277,6 +303,7 @@ function buildOrderText(o) {
   lines.push('MODE: ' + (o.customer.mode === 'antar' ? 'Diantar' : 'Ambil di warung'));
   if (o.customer.mode === 'antar') lines.push('ALAMAT: ' + o.customer.address);
   if (o.customer.note) lines.push('CATATAN: ' + o.customer.note);
+  lines.push((o.customer.mode === 'antar' ? 'WAKTU ANTAR: ' : 'WAKTU AMBIL: ') + fmtSchedule(o.customer.date, o.customer.time));
   lines.push('PEMBAYARAN: ' + (o.pay === 'cash' ? 'Cash (bayar di tempat)' : 'Cashless'));
   lines.push('');
   lines.push('--- ITEM PESANAN ---');
@@ -304,11 +331,27 @@ async function submitOrder(e) {
     return;
   }
 
+  if (!f.dataset.dtTouched) {
+    const n = new Date(), p = x => String(x).padStart(2, '0');
+    f.date.value = `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
+    f.time.value = `${p(n.getHours())}:${p(n.getMinutes())}`;
+  }
+  if (!f.date.value || !f.time.value) {
+    toast('Isi tanggal dan jam pesanan', 'err');
+    return;
+  }
+  if (new Date(`${f.date.value}T${f.time.value}`).getTime() < Date.now() - 60000) {
+    toast('Tanggal/jam sudah lewat, pilih waktu yang akan datang', 'err');
+    return;
+  }
+
   const o = {
     createdAt: Date.now(),
     customer: {
       name: f.name.value.trim(),
       phone: f.phone.value.trim(),
+      date: f.date.value,
+      time: f.time.value,
       mode: f.mode.value,
       address: f.address.value.trim(),
       note: f.note.value.trim()
@@ -336,6 +379,7 @@ async function submitOrder(e) {
       WhatsApp: o.customer.phone,
       Mode: o.customer.mode === 'antar' ? 'Diantar' : 'Ambil di warung',
       Alamat: o.customer.address || '-',
+      [o.customer.mode === 'antar' ? 'Waktu_Antar' : 'Waktu_Ambil']: fmtSchedule(o.customer.date, o.customer.time),
       Catatan: o.customer.note || '-',
       Pembayaran: o.pay === 'cash' ? 'Cash' : 'Cashless',
       Pesanan: o.items.map(i =>
@@ -370,6 +414,8 @@ async function submitOrder(e) {
     const first = (o.customer.name || '').trim().split(/\s+/)[0];
     $('#okTitle').textContent = first ? `Mantap, ${first}! Pesanan terkirim` : 'Pesanan terkirim!';
     $('#okPay').textContent = o.pay === 'cash' ? 'Cash (di tempat)' : 'Cashless';
+    $('#okWhen').textContent = fmtSchedule(o.customer.date, o.customer.time);
+    $('#okWhenLabel').textContent = o.customer.mode === 'antar' ? 'Waktu antar' : 'Waktu ambil';
     $('#okWaBtn').onclick = () => {
       const wa = settings.phone.replace(/[^\d]/g, '').replace(/^0/, '62');
       const msg = encodeURIComponent(
@@ -377,6 +423,7 @@ async function submitOrder(e) {
         `Saya sudah pesan lewat website:\n` +
         `Nama: ${o.customer.name}\n` +
         `Total: ${rp(o.total)}\n` +
+        `${o.customer.mode === 'antar' ? 'Diantar' : 'Diambil'}: ${fmtSchedule(o.customer.date, o.customer.time)}\n` +
         `Pembayaran: ${o.pay === 'cash' ? 'Cash' : 'Cashless'}\n\n` +
         `Mohon dikonfirmasi ya. Terima kasih! 🙏`
       );
@@ -453,11 +500,17 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.closest('#m-topping')) updOpts();
   if (t.name === 'pay') $('#qrBox').hidden = t.value !== 'cashless';
-  if (t.id === 'modeSel') $('#addrWrap').hidden = t.value !== 'antar';
+  if (t.id === 'modeSel') {
+    $('#addrWrap').hidden = t.value !== 'antar';
+    $('#dateWord').textContent = $('#timeWord').textContent = t.value === 'antar' ? 'antar' : 'ambil';
+  }
 });
 
 $('#topAdd').onclick = () => { addToCart(topItem.id, topSel, flavSel, $('#topAdd'), addonSel); closeM($('#m-topping')); };
 $('#checkoutForm').addEventListener('submit', submitOrder);
+$('#checkoutForm').addEventListener('input', e => {
+  if (e.target.name === 'date' || e.target.name === 'time') e.currentTarget.dataset.dtTouched = '1';
+});
 
 /* =========================================================
    TANYA JAWAB & SARAN ANONIM
@@ -467,7 +520,7 @@ const FAQ = [
   {
     q: 'Gimana cara pesan?',
     k: 'order keranjang whatsapp konfirmasi',
-    a: () => 'Pilih menu lalu tekan <b>Tambah</b>. Buka keranjang, isi nama dan nomor WhatsApp, lalu kirim pesanan. Penjual akan menghubungimu lewat WhatsApp untuk konfirmasi.'
+    a: () => 'Pilih menu lalu tekan <b>Tambah</b>. Buka keranjang, isi nama dan nomor WhatsApp, lalu kirim pesanan. Lalu setelah itu konfirmasi ke penjual.'
   },
   {
     q: 'Bisa diantar ke rumah?',
@@ -714,26 +767,32 @@ const MUSIC_VOL = 0.35;
 (function initIntro() {
   const intro = $('#intro');
   if (!intro) return;
-  if (matchMedia('(prefers-reduced-motion: reduce)').matches) { intro.remove(); showWelcome(); return; }
+  const src = $('.hero .bowl'), slot = $('#introBowl');
+  if (matchMedia('(prefers-reduced-motion: reduce)').matches || !src || !slot) { intro.remove(); showWelcome(); return; }
   document.body.classList.add('intro-lock');
+
+  /* mangkuk intro = salinan mangkuk hero, jadi serah-terimanya mulus tanpa loncatan */
+  const bowl = src.cloneNode(true);
+  bowl.removeAttribute('class'); bowl.classList.add('ib'); bowl.id = 'introBowl';
+  slot.replaceWith(bowl);
 
   const brand = $('#introBrand');
   brand.innerHTML = [...brand.textContent].map((ch, i) => `<i style="--i:${i}">${ch}</i>`).join('');
 
-  /* percikan: ledakan kecil saat topping mendarat, lalu bara naik dari mangkuk */
+  /* percikan: ledakan kecil saat baso mendarat, lalu uap/bara naik dari mangkuk */
   const canvas = $('#introParticles'), ctx = canvas.getContext('2d');
-  const D = devicePixelRatio || 1, COLORS = ['#ffc933', '#d62718', '#ff8a3d', '#fff6e6'];
-  let W = 0, H = 0, ox = 0, oy = 0, ps = [], raf = 0, burst = false, t0 = performance.now();
+  const D = devicePixelRatio || 1, COLORS = ['#ffc933', '#ffe08a', '#ff8a3d', '#fff6e6'];
+  let W = 0, H = 0, ox = 0, oy = 0, ps = [], raf = 0, burst = false, leaving = false, t0 = performance.now();
   function resize() {
     W = canvas.width = innerWidth * D; H = canvas.height = innerHeight * D;
-    const r = $('#introBowl').getBoundingClientRect();
+    const r = bowl.getBoundingClientRect();
     ox = (r.left + r.width / 2) * D; oy = (r.top + r.height * .45) * D;
   }
   const spark = (a, s, up) => ps.push({ x: ox + (up ? (Math.random() - .5) * 200 * D : 0), y: oy, vx: Math.cos(a) * s, vy: Math.sin(a) * s, size: (1.5 + Math.random() * 3.5) * D, color: COLORS[Math.random() * 4 | 0], life: 1, decay: .01 + Math.random() * .015, up });
   function draw(now) {
     const t = now - t0; ctx.clearRect(0, 0, W, H);
-    if (t > 1500 && !burst) { burst = true; for (let i = 0; i < 36; i++) spark(Math.random() * 6.28, (1.5 + Math.random() * 3.5) * D, false); }
-    if (t > 1700 && ps.length < 70) spark(-Math.PI / 2, (.6 + Math.random() * 1.2) * D, true);
+    if (t > 2100 && !burst) { burst = true; for (let i = 0; i < 36; i++) spark(Math.random() * 6.28, (1.5 + Math.random() * 3.5) * D, false); }
+    if (t > 2300 && !leaving && ps.length < 70) spark(-Math.PI / 2, (.6 + Math.random() * 1.2) * D, true);
     for (let i = ps.length - 1; i >= 0; i--) {
       const p = ps[i]; p.x += p.vx; p.y += p.vy; if (!p.up) p.vy += .05 * D; p.vx *= .985; p.life -= p.decay;
       if (p.life <= 0) { ps.splice(i, 1); continue; }
@@ -743,13 +802,34 @@ const MUSIC_VOL = 0.35;
   }
   resize(); addEventListener('resize', resize); raf = requestAnimationFrame(draw);
 
-  const timer = setTimeout(finishIntro, 3900);
+  const timer = setTimeout(finishIntro, 4300);
   function finishIntro() {
-    clearTimeout(timer);
+    if (leaving) return; leaving = true; clearTimeout(timer);
+    const body = document.body, stage = $('.bowl-stage');
+    /* kalau dilewati di tengah jalan, selesaikan dulu animasi mangkuk supaya isinya lengkap */
+    bowl.getAnimations({ subtree: true }).forEach(an => { if (an.effect.getComputedTiming().iterations !== Infinity) an.finish(); });
+    body.classList.add('bowl-wait');
+    body.classList.remove('intro-lock');
     intro.classList.add('done');
-    document.body.classList.remove('intro-lock');
-    setTimeout(() => { cancelAnimationFrame(raf); removeEventListener('resize', resize); intro.remove(); }, 1000);
-    setTimeout(showWelcome, 500);
+    const a = bowl.getBoundingClientRect(), b = src.getBoundingClientRect();
+
+    intro.querySelectorAll('.intro-title,.intro-tagline,.intro-loader,.intro-skip,.intro-particles').forEach(el =>
+      el.animate([{ opacity: 1 }, { opacity: 0, transform: 'translateY(-16px)' }], { duration: 450, easing: 'ease-in', fill: 'forwards' }));
+
+    /* mangkuk "terbang" ke posisi mangkuk hero (kalau hero-nya terlihat), kalau tidak: membesar sambil memudar */
+    const fits = b.width > 0 && b.top < innerHeight * .8 && b.bottom > 0;
+    const to = fits
+      ? { transform: `translate(${b.left + b.width / 2 - a.left - a.width / 2}px,${b.top + b.height / 2 - a.top - a.height / 2}px) scale(${b.width / a.width})` }
+      : { transform: 'scale(1.12)', opacity: 0 };
+    const fly = bowl.animate([{ transform: 'none', opacity: 1 }, to], { duration: 1050, easing: 'cubic-bezier(.65,0,.2,1)', fill: 'forwards' });
+    const land = () => {
+      stage.style.transition = fits ? 'none' : 'opacity .7s ease';
+      body.classList.remove('bowl-wait');
+      bowl.style.visibility = 'hidden';
+      showWelcome();
+    };
+    fly.finished.then(land, land);
+    setTimeout(() => { cancelAnimationFrame(raf); removeEventListener('resize', resize); intro.remove(); }, 1300);
   }
   intro.addEventListener('click', finishIntro, { once: true });
 })();
