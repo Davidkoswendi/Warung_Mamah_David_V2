@@ -259,7 +259,8 @@
   <div class="modal-box">
     <div class="drawer-head"><h3 id="topTitle">Pilih opsi</h3><button class="x" data-close aria-label="Tutup">✕</button></div>
     <p class="muted" id="topInfo"></p>
-    <div class="optsec" id="flavWrap" hidden><h4>Pilih rasa / saos <span class="muted">(pilih 1)</span></h4><div class="topgrid" id="flavGrid"></div></div>
+    <div class="optsec" id="sauceWrap" hidden><h4><span id="sauceTitle">Pilih saos</span> <span class="muted" id="sauceHint">(pilih 1)</span></h4><div class="topgrid" id="sauceGrid"></div></div>
+    <div class="optsec" id="flavWrap" hidden><h4>Pilih tingkat kepedasan <span class="muted">(pilih 1)</span></h4><div class="topgrid" id="flavGrid"></div></div>
     <div class="optsec" id="addonWrap" hidden><h4>Tambahan <span class="muted">(opsional)</span></h4><div class="topgrid" id="addonGrid"></div></div>
     <div class="optsec" id="topWrap" hidden><h4>Pilih topping <span class="muted">(minimal 1)</span></h4><div class="topgrid" id="topGrid"></div></div>
     <div class="row-between sticky-foot">
@@ -278,12 +279,23 @@
           <label>Nama kamu<input name="name" required placeholder="Contoh: Budi" autocomplete="name"></label>
           <label>No. HP / WhatsApp<input name="phone" required inputmode="tel" placeholder="08xxxxxxxxxx" autocomplete="tel"></label>
           <label>Cara pengambilan
-            <select name="mode" id="modeSel"><option value="ambil">Ambil di warung</option><option value="antar">Diantar</option></select>
+            <select name="mode" id="modeSel"><option value="ambil">Ambil di warung</option><option value="antar">Diantar</option><option value="kampus">Anter Kampus UPI Cibiru</option></select>
           </label>
-          <label id="addrWrap" hidden>Alamat pengantaran<textarea name="address" rows="2" placeholder="Alamat lengkap" autocomplete="street-address"></textarea></label>
+          <div class="antar" id="antarWrap" hidden>
+            <label>Alamat pengantaran<textarea name="address" rows="2" placeholder="Alamat lengkap" autocomplete="street-address"></textarea></label>
+            <div class="card ship-info" id="shipInfo">Ongkir Rp1.500 per km, akan dihitung &amp; dikonfirmasi penjual lewat WhatsApp.</div>
+          </div>
+          <div class="kampus" id="kampusWrap" hidden>
+            <p class="muted">Diantar ke Kampus UPI Cibiru, tidak perlu alamat. Isi data kelasmu ya.</p>
+            <div class="dt-row">
+              <label>Angkatan<input name="angkatan" inputmode="numeric" maxlength="4" placeholder="Contoh: 2026"></label>
+              <label>Kelas<input name="kelas" maxlength="20" placeholder="Contoh: 1C"></label>
+            </div>
+            <label>Prodi<input name="jurusan" maxlength="60" placeholder="Contoh: RPL"></label>
+          </div>
           <div class="dt-row">
-            <label id="dateLabel">Tanggal <span id="dateWord">ambil</span><input type="date" name="date" id="orderDate" required></label>
-            <label id="timeLabel">Jam <span id="timeWord">ambil</span><input type="time" name="time" id="orderTime" required></label>
+            <label id="dateLabel">Tanggal<input type="date" name="date" id="orderDate" required></label>
+            <label id="timeLabel">Jam<input type="time" name="time" id="orderTime" required></label>
           </div>
           <label>Catatan (opsional)<textarea name="note" rows="2" placeholder="Misal: jangan pakai bawang"></textarea></label>
         </div>

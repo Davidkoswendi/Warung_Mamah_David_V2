@@ -15,9 +15,20 @@ const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); retur
 const WEB3FORMS_KEY = '738e6f6e-0fc3-4def-8520-fddf4d24e0f0';
 
 /* =========================================================
+   ONGKIR
+   ========================================================= */
+const RATE_PER_KM = 1500;   // hanya untuk keterangan; ongkir dihitung & dikonfirmasi penjual lewat WhatsApp
+const CAMPUS_FEE = 0;       // ongkir Anter Kampus UPI Cibiru
+const MODE_LABEL = { ambil: 'Ambil di warung', antar: 'Diantar', kampus: 'Anter Kampus UPI Cibiru' };
+
+/* =========================================================
    MENU
    ========================================================= */
 const TOP = ['Kerupuk', 'Bakso', 'Sosis', 'Ceker', 'Makaroni', 'Telur', 'Mie', 'Sayuran', 'Cikur', 'Tulang', 'Basreng', 'Dumpling'];
+
+const LEVEL_PEDAS = ['Normal', 'Pedas', 'Super pedas'];
+const SAUCE_KEJU_BBQ = { label: 'Pilih saos', multi: false, required: true, options: ['Keju', 'BBQ'] };
+const SAUCE_TAMBAHAN = { label: 'Tambahan saos', multi: true, required: false, options: ['Pedas', 'Tomat', 'Mayones'] };
 
 const MENU = [
   {
@@ -30,7 +41,10 @@ const MENU = [
     available: true,
     img: 'img/ayam-kocak.jpg',
     toppings: [],
-    flavors: ['Normal', 'Pedas', 'Super pedas'],
+    flavors: ['Pedas', 'Super pedas'],
+    /* kepedasan hanya muncul kalau saos Ayam Kocak dipilih; saos keju & BBQ tanpa pilihan pedas */
+    sauce: { label: 'Pilih saos', multi: false, required: true, options: ['Ayam Kocak', 'Keju', 'BBQ'] },
+    flavorWhen: ['Ayam Kocak'],
     addon: { name: 'Nasi', price: 5000 }
   },
   {
@@ -60,15 +74,14 @@ const MENU = [
     flavors: []
   },
   ...[
-    { name: 'Spaghetti Chicken', img: 'img/spaghetti-chicken.jpg' },
-    { name: 'Pasta Macaroni',    img: 'img/pasta-macaroni.jpg' },
-    { name: 'Kentang Frozen',    img: 'img/kentang-frozen.jpg' },
-    { name: 'Steak Chicken',     img: 'img/steak-chicken.jpg' },
-    { name: 'Chicken Katsu',     img: 'img/chicken-katsu.jpg' },
-    { name: 'Chicken Cheese',    img: 'img/chicken-cheese.jpg' },
-    { name: 'Kebab',             img: 'img/Kebab.jpg' },
-    { name: 'Baso Bakar',        img: 'img/baso-bakar.jpg' },
-    { name: 'Topoki',            img: 'img/topoki.jpg' }
+    { name: 'Spaghetti Chicken', img: 'img/spaghetti-chicken.jpg', flavors: LEVEL_PEDAS },
+    { name: 'Pasta Macaroni',    img: 'img/pasta-macaroni.jpg',    flavors: LEVEL_PEDAS },
+    { name: 'Kentang Frozen',    img: 'img/kentang-frozen.jpg',    sauce: SAUCE_TAMBAHAN },
+    { name: 'Steak Chicken',     img: 'img/steak-chicken.jpg',     sauce: SAUCE_KEJU_BBQ },
+    { name: 'Chicken Katsu',     img: 'img/chicken-katsu.jpg',     sauce: SAUCE_KEJU_BBQ },
+    { name: 'Kebab',             img: 'img/Kebab.jpg',             flavors: LEVEL_PEDAS },
+    { name: 'Baso Bakar',        img: 'img/baso-bakar.jpg',        sauce: SAUCE_TAMBAHAN },
+    { name: 'Topoki',            img: 'img/topoki.jpg',            flavors: LEVEL_PEDAS }
   ].map((item, i) => ({
     id: 'm' + (i + 3),
     name: item.name,
@@ -79,7 +92,8 @@ const MENU = [
     available: true,
     img: item.img,
     toppings: [],
-    flavors: []
+    flavors: item.flavors || [],
+    sauce: item.sauce || null
   }))
 ];
 
@@ -107,8 +121,8 @@ const openM = id => $('#' + id).classList.add('open');
 const closeM = el => el.classList.remove('open');
 const hue = m => 6 + [...(m.name || '')].reduce((a, c) => a + c.charCodeAt(0), 0) % 44;
 const picHTML = m => m.img ? `<img src="${m.img}" alt="${esc(m.name)}" loading="lazy">` : `<div class="ph" style="--h:${hue(m)}">${esc((m.name || '?')[0].toUpperCase())}</div>`;
-const needsOpts = m => m.type === 'seblak' || m.flavors.length > 0 || !!m.addon;
-const optText = c => [c.flavor ? 'Rasa: ' + c.flavor : '', c.toppings.length ? 'Topping: ' + c.toppings.join(', ') : '', c.addon ? '+ Nasi' : ''].filter(Boolean).join(' • ');
+const needsOpts = m => m.type === 'seblak' || m.flavors.length > 0 || !!m.sauce || !!m.addon;
+const optText = c => [c.sauces && c.sauces.length ? 'Saos: ' + c.sauces.join(', ') : '', c.flavor ? 'Rasa: ' + c.flavor : '', c.toppings.length ? 'Topping: ' + c.toppings.join(', ') : '', c.addon ? '+ Nasi' : ''].filter(Boolean).join(' • ');
 
 /* animasi keranjang */
 function fly(from, m) {
@@ -168,10 +182,10 @@ const itemPrice = c => { const m = menu.find(x => x.id === c.id); if (!m) return
 const cartCount = () => cart.reduce((a, c) => a + c.qty, 0);
 const cartTotal = () => cart.reduce((a, c) => a + itemPrice(c) * c.qty, 0);
 function saveCart() { save('wp_cart', cart); renderCartUI(); }
-function addToCart(id, toppings = [], flavor = '', src = null, addon = false) {
-  const key = id + '|' + flavor + '|' + [...toppings].sort().join(',') + (addon ? '|nasi' : '');
+function addToCart(id, toppings = [], flavor = '', src = null, addon = false, sauces = []) {
+  const key = id + '|' + flavor + '|' + [...toppings].sort().join(',') + '|' + [...sauces].sort().join(',') + (addon ? '|nasi' : '');
   const ex = cart.find(c => c.key === key);
-  if (ex) ex.qty++; else cart.push({ key, id, qty: 1, toppings, flavor, addon });
+  if (ex) ex.qty++; else cart.push({ key, id, qty: 1, toppings, flavor, addon, sauces });
   fly(src, menu.find(m => m.id === id)); saveCart(); toast('Masuk keranjang');
 }
 function renderCartUI() {
@@ -222,7 +236,7 @@ function renderMenu() {
   $('#menuGrid').innerHTML = list.map(m => {
     const inCart = cart.filter(c => c.id === m.id).reduce((a, c) => a + c.qty, 0);
     const price = m.type === 'seblak' ? `${rp(m.price)} <small>/ topping</small>` : rp(m.price);
-    const chips = [m.type === 'seblak' ? `${m.toppings.length} topping` : '', m.flavors.length ? `${m.flavors.length} pilihan rasa` : '', m.addon ? `Tambah nasi +${rp(m.addon.price)}` : ''].filter(Boolean);
+    const chips = [m.type === 'seblak' ? `${m.toppings.length} topping` : '', m.flavors.length ? `${m.flavors.length} pilihan rasa` : '', m.sauce ? (m.sauce.multi ? 'Tambahan saos' : `${m.sauce.options.length} pilihan saos`) : '', m.addon ? `Tambah nasi +${rp(m.addon.price)}` : ''].filter(Boolean);
     const label = m.upcoming ? 'Upcoming' : 'Habis';
     return `<article class="food ${m.available ? '' : m.upcoming ? 'upcoming' : 'soldout'}">
       ${!m.available ? `<span class="tag">${label}</span>` : ''}
@@ -243,13 +257,20 @@ function renderMenu() {
 }
 
 /* ---------- pilihan rasa & topping ---------- */
-let topSel = [], flavSel = '', addonSel = false, topItem = null, topSrc = null;
+let topSel = [], flavSel = '', sauceSel = [], addonSel = false, topItem = null, topSrc = null;
 function openOpts(id, src) {
-  topItem = menu.find(m => m.id === id); topSel = []; flavSel = ''; addonSel = false; topSrc = src;
+  topItem = menu.find(m => m.id === id); topSel = []; flavSel = ''; sauceSel = []; addonSel = false; topSrc = src;
   const m = topItem, seb = m.type === 'seblak';
   $('#topTitle').textContent = m.name;
   $('#topInfo').textContent = seb ? `${rp(m.price)} per topping.` : rp(m.price);
   $('#flavWrap').hidden = !m.flavors.length; $('#topWrap').hidden = !seb;
+  const sc = m.sauce;
+  $('#sauceWrap').hidden = !sc;
+  if (sc) {
+    $('#sauceTitle').textContent = sc.label;
+    $('#sauceHint').textContent = sc.multi ? '(opsional, bisa lebih dari 1)' : sc.required ? '(pilih 1)' : '(opsional)';
+    $('#sauceGrid').innerHTML = sc.options.map(o => `<label class="top"><input type="${sc.multi ? 'checkbox' : 'radio'}" name="sauce" value="${esc(o)}">Saos ${esc(o)}</label>`).join('');
+  } else $('#sauceGrid').innerHTML = '';
   $('#flavGrid').innerHTML = m.flavors.map(f => `<label class="top"><input type="radio" name="flav" value="${esc(f)}">${esc(f)}</label>`).join('');
   $('#topGrid').innerHTML = m.toppings.map(t => `<label class="top"><input type="checkbox" value="${esc(t)}">${esc(t)}</label>`).join('');
   $('#addonWrap').hidden = !m.addon;
@@ -259,11 +280,15 @@ function openOpts(id, src) {
 function updOpts() {
   $$('#m-topping .top').forEach(l => l.classList.toggle('on', l.querySelector('input').checked));
   topSel = $$('#topGrid input:checked').map(i => i.value);
-  flavSel = ($('#flavGrid input:checked') || {}).value || '';
+  sauceSel = $$('#sauceGrid input:checked').map(i => i.value);
+  /* kepedasan hanya ditanya untuk saos tertentu (mis. Ayam Kocak), selain itu disembunyikan */
+  const flavOn = topItem.flavors.length > 0 && (!topItem.flavorWhen || sauceSel.some(s => topItem.flavorWhen.includes(s)));
+  $('#flavWrap').hidden = !flavOn;
+  flavSel = flavOn ? (($('#flavGrid input:checked') || {}).value || '') : '';
   addonSel = ($('#addonGrid input:checked') || {}).value === '1';
   const m = topItem, seb = m.type === 'seblak', ad = addonSel && m.addon ? m.addon.price : 0;
   $('#topSum').textContent = seb ? `${topSel.length} topping • ${rp(topSel.length * m.price + ad)}` : rp(m.price + ad);
-  $('#topAdd').disabled = (seb && !topSel.length) || (m.flavors.length > 0 && !flavSel);
+  $('#topAdd').disabled = (seb && !topSel.length) || (flavOn && !flavSel) || (!!m.sauce && m.sauce.required && !sauceSel.length);
 }
 
 /* ---------- checkout & kirim email ---------- */
@@ -271,19 +296,34 @@ function openCheckout() {
   if (!cart.length) return;
   closeM($('#m-cart'));
   const f = $('#checkoutForm'); f.reset();
-  $('#addrWrap').hidden = true; $('#qrBox').hidden = true;
+  $('#antarWrap').hidden = true; $('#kampusWrap').hidden = true; $('#qrBox').hidden = true;
   const last = load('wp_buyer', null); if (last) { f.name.value = last.name; f.phone.value = last.phone; }
   const now = new Date(), pad = n => String(n).padStart(2, '0');
   const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   f.date.min = today; f.date.value = today;
   f.time.value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
   f.dataset.dtTouched = '';
-  $('#dateWord').textContent = $('#timeWord').textContent = 'ambil';
+  renderSummary();
+  openM('m-checkout');
+}
+
+/* ---------- ringkasan + ongkir ---------- */
+function renderSummary() {
+  const mode = $('#checkoutForm').mode.value;
+  const ship = mode === 'kampus' ? `<div class="ln"><span>Ongkir <small>(Kampus UPI Cibiru)</small></span><span>${CAMPUS_FEE ? rp(CAMPUS_FEE) : 'Gratis'}</span></div>` : '';
   $('#sumBox').innerHTML = '<b>Ringkasan</b>' + cart.map(c => {
     const m = menu.find(x => x.id === c.id);
     return `<div class="ln"><span>${c.qty}× ${esc(m.name)}${optText(c) ? ` <small>(${esc(optText(c))})</small>` : ''}</span><span>${rp(itemPrice(c) * c.qty)}</span></div>`;
-  }).join('') + `<div class="ln tot"><span>Total</span><span>${rp(cartTotal())}</span></div>`;
-  openM('m-checkout');
+  }).join('') + ship + `<div class="ln tot"><span>Total</span><span>${rp(grandTotal())}</span></div>`;
+}
+
+const shipFee = mode => mode === 'kampus' ? CAMPUS_FEE : 0;
+const grandTotal = () => cartTotal() + shipFee($('#checkoutForm').mode.value);
+
+function setMode(mode) {
+  $('#antarWrap').hidden = mode !== 'antar';
+  $('#kampusWrap').hidden = mode !== 'kampus';
+  renderSummary();
 }
 
 function fmtSchedule(date, time) {
@@ -300,17 +340,21 @@ function buildOrderText(o) {
   lines.push('');
   lines.push('NAMA: ' + o.customer.name);
   lines.push('HP/WA: ' + o.customer.phone);
-  lines.push('MODE: ' + (o.customer.mode === 'antar' ? 'Diantar' : 'Ambil di warung'));
+  lines.push('MODE: ' + MODE_LABEL[o.customer.mode]);
   if (o.customer.mode === 'antar') lines.push('ALAMAT: ' + o.customer.address);
+  if (o.customer.mode === 'kampus') lines.push(`DATA KAMPUS: Angkatan ${o.customer.angkatan}, Jurusan ${o.customer.jurusan}, Kelas ${o.customer.kelas}`);
   if (o.customer.note) lines.push('CATATAN: ' + o.customer.note);
-  lines.push((o.customer.mode === 'antar' ? 'WAKTU ANTAR: ' : 'WAKTU AMBIL: ') + fmtSchedule(o.customer.date, o.customer.time));
+  lines.push((o.customer.mode === 'ambil' ? 'WAKTU AMBIL: ' : 'WAKTU ANTAR: ') + fmtSchedule(o.customer.date, o.customer.time));
   lines.push('PEMBAYARAN: ' + (o.pay === 'cash' ? 'Cash (bayar di tempat)' : 'Cashless'));
   lines.push('');
   lines.push('--- ITEM PESANAN ---');
   o.items.forEach((i, idx) => {
-    lines.push(`${idx + 1}. ${i.qty}× ${i.name}${i.flavor ? ' [Rasa: ' + i.flavor + ']' : ''}${i.toppings && i.toppings.length ? ' [Topping: ' + i.toppings.join(', ') + ']' : ''}${i.addon ? ' [+ Nasi]' : ''} = ${rp(i.price * i.qty)}`);
+    lines.push(`${idx + 1}. ${i.qty}× ${i.name}${i.sauces && i.sauces.length ? ' [Saos: ' + i.sauces.join(', ') + ']' : ''}${i.flavor ? ' [Rasa: ' + i.flavor + ']' : ''}${i.toppings && i.toppings.length ? ' [Topping: ' + i.toppings.join(', ') + ']' : ''}${i.addon ? ' [+ Nasi]' : ''} = ${rp(i.price * i.qty)}`);
   });
   lines.push('');
+  lines.push('SUBTOTAL: ' + rp(o.subtotal));
+  if (o.customer.mode === 'antar') lines.push(`ONGKIR: Rp${RATE_PER_KM.toLocaleString('id-ID')} per km, dikonfirmasi penjual via WhatsApp`);
+  if (o.customer.mode === 'kampus') lines.push('ONGKIR: ' + (o.ongkir ? rp(o.ongkir) : 'Gratis'));
   lines.push('TOTAL: ' + rp(o.total));
   lines.push('');
   lines.push('=== AKHIR PESANAN ===');
@@ -328,6 +372,10 @@ async function submitOrder(e) {
 
   if (f.mode.value === 'antar' && !f.address.value.trim()) {
     toast('Isi alamat pengantaran', 'err');
+    return;
+  }
+  if (f.mode.value === 'kampus' && !(f.angkatan.value.trim() && f.jurusan.value.trim() && f.kelas.value.trim())) {
+    toast('Isi angkatan, jurusan, dan kelas', 'err');
     return;
   }
 
@@ -353,14 +401,20 @@ async function submitOrder(e) {
       date: f.date.value,
       time: f.time.value,
       mode: f.mode.value,
-      address: f.address.value.trim(),
+      address: f.mode.value === 'antar' ? f.address.value.trim() : '',
+      angkatan: f.mode.value === 'kampus' ? f.angkatan.value.trim() : '',
+      jurusan: f.mode.value === 'kampus' ? f.jurusan.value.trim() : '',
+      kelas: f.mode.value === 'kampus' ? f.kelas.value.trim() : '',
       note: f.note.value.trim()
     },
+
     items: cart.map(c => {
       const m = menu.find(x => x.id === c.id);
-      return { name: m.name, qty: c.qty, price: itemPrice(c), toppings: c.toppings, flavor: c.flavor || '', addon: !!c.addon };
+      return { name: m.name, qty: c.qty, price: itemPrice(c), toppings: c.toppings, flavor: c.flavor || '', sauces: c.sauces || [], addon: !!c.addon };
     }),
-    total: cartTotal(),
+    subtotal: cartTotal(),
+    ongkir: f.mode.value === 'kampus' ? CAMPUS_FEE : 0,
+    total: grandTotal(),
     pay: f.pay.value
   };
 
@@ -377,18 +431,24 @@ async function submitOrder(e) {
 
       Nama: o.customer.name,
       WhatsApp: o.customer.phone,
-      Mode: o.customer.mode === 'antar' ? 'Diantar' : 'Ambil di warung',
+      Mode: MODE_LABEL[o.customer.mode],
       Alamat: o.customer.address || '-',
-      [o.customer.mode === 'antar' ? 'Waktu_Antar' : 'Waktu_Ambil']: fmtSchedule(o.customer.date, o.customer.time),
+      Angkatan: o.customer.angkatan || '-',
+      Jurusan: o.customer.jurusan || '-',
+      Kelas: o.customer.kelas || '-',
+      [o.customer.mode === 'ambil' ? 'Waktu_Ambil' : 'Waktu_Antar']: fmtSchedule(o.customer.date, o.customer.time),
       Catatan: o.customer.note || '-',
       Pembayaran: o.pay === 'cash' ? 'Cash' : 'Cashless',
       Pesanan: o.items.map(i =>
         `${i.qty}x ${i.name}` +
+        (i.sauces && i.sauces.length ? ` (Saos: ${i.sauces.join(', ')})` : '') +
         (i.flavor ? ` (Rasa: ${i.flavor})` : '') +
         (i.toppings && i.toppings.length ? ` (Topping: ${i.toppings.join(', ')})` : '') +
         (i.addon ? ' (+ Nasi)' : '') +
         ` = ${rp(i.price * i.qty)}`
       ).join('\n'),
+      Subtotal: rp(o.subtotal),
+      Ongkir: o.customer.mode === 'antar' ? `Rp${RATE_PER_KM.toLocaleString('id-ID')} per km, dikonfirmasi penjual via WhatsApp` : o.customer.mode === 'kampus' ? (o.ongkir ? rp(o.ongkir) : 'Gratis') : '-',
       Total: rp(o.total),
       Waktu: new Date(o.createdAt).toLocaleString('id-ID'),
       Detail: buildOrderText(o)
@@ -415,7 +475,7 @@ async function submitOrder(e) {
     $('#okTitle').textContent = first ? `Mantap, ${first}! Pesanan terkirim` : 'Pesanan terkirim!';
     $('#okPay').textContent = o.pay === 'cash' ? 'Cash (di tempat)' : 'Cashless';
     $('#okWhen').textContent = fmtSchedule(o.customer.date, o.customer.time);
-    $('#okWhenLabel').textContent = o.customer.mode === 'antar' ? 'Waktu antar' : 'Waktu ambil';
+    $('#okWhenLabel').textContent = o.customer.mode === 'ambil' ? 'Waktu ambil' : 'Waktu antar';
     $('#okWaBtn').onclick = () => {
       const wa = settings.phone.replace(/[^\d]/g, '').replace(/^0/, '62');
       const msg = encodeURIComponent(
@@ -423,7 +483,7 @@ async function submitOrder(e) {
         `Saya sudah pesan lewat website:\n` +
         `Nama: ${o.customer.name}\n` +
         `Total: ${rp(o.total)}\n` +
-        `${o.customer.mode === 'antar' ? 'Diantar' : 'Diambil'}: ${fmtSchedule(o.customer.date, o.customer.time)}\n` +
+        `${o.customer.mode === 'ambil' ? 'Diambil' : 'Diantar'}${o.customer.mode === 'kampus' ? ' (Kampus UPI Cibiru)' : ''}: ${fmtSchedule(o.customer.date, o.customer.time)}\n` +
         `Pembayaran: ${o.pay === 'cash' ? 'Cash' : 'Cashless'}\n\n` +
         `Mohon dikonfirmasi ya. Terima kasih! 🙏`
       );
@@ -500,13 +560,10 @@ document.addEventListener('change', e => {
   const t = e.target;
   if (t.closest('#m-topping')) updOpts();
   if (t.name === 'pay') $('#qrBox').hidden = t.value !== 'cashless';
-  if (t.id === 'modeSel') {
-    $('#addrWrap').hidden = t.value !== 'antar';
-    $('#dateWord').textContent = $('#timeWord').textContent = t.value === 'antar' ? 'antar' : 'ambil';
-  }
+  if (t.id === 'modeSel') setMode(t.value);
 });
 
-$('#topAdd').onclick = () => { addToCart(topItem.id, topSel, flavSel, $('#topAdd'), addonSel); closeM($('#m-topping')); };
+$('#topAdd').onclick = () => { addToCart(topItem.id, topSel, flavSel, $('#topAdd'), addonSel, sauceSel); closeM($('#m-topping')); };
 $('#checkoutForm').addEventListener('submit', submitOrder);
 $('#checkoutForm').addEventListener('input', e => {
   if (e.target.name === 'date' || e.target.name === 'time') e.currentTarget.dataset.dtTouched = '1';
@@ -525,7 +582,7 @@ const FAQ = [
   {
     q: 'Bisa diantar ke rumah?',
     k: 'antar delivery alamat ambil',
-    a: () => 'Bisa. Pilih <b>Diantar</b> di formulir pemesanan dan isi alamat lengkap. Kalau mau ambil sendiri, pilih <b>Ambil di warung</b>. Detail pengantaran dikonfirmasi penjual lewat WhatsApp.'
+    a: () => `Bisa. Pilih <b>Diantar</b> di formulir pemesanan, isi alamat lengkap. Ongkir Rp${RATE_PER_KM.toLocaleString('id-ID')} per km, dihitung dan dikonfirmasi penjual lewat WhatsApp. Mahasiswa UPI Cibiru bisa pilih <b>Anter Kampus UPI Cibiru</b>. Kalau mau ambil sendiri, pilih <b>Ambil di warung</b>. Detail pengantaran dikonfirmasi penjual lewat WhatsApp.`
   },
   {
     q: 'Bayarnya gimana?',
