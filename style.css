@@ -761,3 +761,5 @@ html:has(.modal.open,.drawer.open) body{overflow:hidden}
 /* ---------- pengantaran & kampus ---------- */
 .antar,.kampus{display:grid;gap:12px}
 .ship-info{background:#fffdf5;border-style:dashed;font-size:.88rem;line-height:1.45;padding:10px 12px}
+/* pilihan saos yang sudah mencapai batas maksimal */
+.top:has(input:disabled){opacity:.45;cursor:not-allowed}

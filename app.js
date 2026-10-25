@@ -26,9 +26,11 @@ const MODE_LABEL = { ambil: 'Ambil di warung', antar: 'Diantar', kampus: 'Anter 
    ========================================================= */
 const TOP = ['Kerupuk', 'Bakso', 'Sosis', 'Ceker', 'Makaroni', 'Telur', 'Mie', 'Sayuran', 'Cikur', 'Tulang', 'Basreng', 'Dumpling'];
 
+const MAX_SAUCE = 3;   // batas maksimal pilihan saos (untuk saos yang bisa pilih lebih dari 1)
 const LEVEL_PEDAS = ['Normal', 'Pedas', 'Super pedas'];
 const SAUCE_KEJU_BBQ = { label: 'Pilih saos', multi: false, required: true, options: ['Keju', 'BBQ'] };
 const SAUCE_TAMBAHAN = { label: 'Tambahan saos', multi: true, required: false, options: ['Pedas', 'Tomat', 'Mayones'] };
+const SAUCE_BASO_BAKAR = { label: 'Tambahan saos', multi: true, required: false, options: ['Pedas', 'Tomat', 'Mayones', 'Chili Oil'] };
 
 const MENU = [
   {
@@ -77,11 +79,12 @@ const MENU = [
     { name: 'Spaghetti Chicken', img: 'img/spaghetti-chicken.jpg', flavors: LEVEL_PEDAS },
     { name: 'Pasta Macaroni',    img: 'img/pasta-macaroni.jpg',    flavors: LEVEL_PEDAS },
     { name: 'Kentang Frozen',    img: 'img/kentang-frozen.jpg',    sauce: SAUCE_TAMBAHAN },
-    { name: 'Steak Chicken',     img: 'img/steak-chicken.jpg',     sauce: SAUCE_KEJU_BBQ },
-    { name: 'Chicken Katsu',     img: 'img/chicken-katsu.jpg',     sauce: SAUCE_KEJU_BBQ },
+    { name: 'Steak Chicken',     img: 'img/steak-chicken.jpg' },
+    { name: 'Chicken Katsu',     img: 'img/chicken-katsu.jpg' },
     { name: 'Kebab',             img: 'img/Kebab.jpg',             flavors: LEVEL_PEDAS },
-    { name: 'Baso Bakar',        img: 'img/baso-bakar.jpg',        sauce: SAUCE_TAMBAHAN },
-    { name: 'Topoki',            img: 'img/topoki.jpg',            flavors: LEVEL_PEDAS }
+    { name: 'Baso Bakar',        img: 'img/baso-bakar.jpg',        sauce: SAUCE_BASO_BAKAR },
+    { name: 'Topoki',            img: 'img/topoki.jpg',            flavors: LEVEL_PEDAS },
+    { name: 'Chicken Cheese',    img: 'img/chicken-cheese.jpg' }
   ].map((item, i) => ({
     id: 'm' + (i + 3),
     name: item.name,
@@ -268,7 +271,7 @@ function openOpts(id, src) {
   $('#sauceWrap').hidden = !sc;
   if (sc) {
     $('#sauceTitle').textContent = sc.label;
-    $('#sauceHint').textContent = sc.multi ? '(opsional, bisa lebih dari 1)' : sc.required ? '(pilih 1)' : '(opsional)';
+    $('#sauceHint').textContent = sc.multi ? `(opsional, maksimal ${MAX_SAUCE})` : sc.required ? '(pilih 1)' : '(opsional)';
     $('#sauceGrid').innerHTML = sc.options.map(o => `<label class="top"><input type="${sc.multi ? 'checkbox' : 'radio'}" name="sauce" value="${esc(o)}">Saos ${esc(o)}</label>`).join('');
   } else $('#sauceGrid').innerHTML = '';
   $('#flavGrid').innerHTML = m.flavors.map(f => `<label class="top"><input type="radio" name="flav" value="${esc(f)}">${esc(f)}</label>`).join('');
@@ -281,6 +284,7 @@ function updOpts() {
   $$('#m-topping .top').forEach(l => l.classList.toggle('on', l.querySelector('input').checked));
   topSel = $$('#topGrid input:checked').map(i => i.value);
   sauceSel = $$('#sauceGrid input:checked').map(i => i.value);
+  if (topItem.sauce && topItem.sauce.multi) $$('#sauceGrid input:not(:checked)').forEach(i => { i.disabled = sauceSel.length >= MAX_SAUCE; });
   /* kepedasan hanya ditanya untuk saos tertentu (mis. Ayam Kocak), selain itu disembunyikan */
   const flavOn = topItem.flavors.length > 0 && (!topItem.flavorWhen || sauceSel.some(s => topItem.flavorWhen.includes(s)));
   $('#flavWrap').hidden = !flavOn;
@@ -801,13 +805,17 @@ const MUSIC_VOL = 0.35;
     else { userMuted = true; save('wp_music_off', true); au.pause(); }
   });
 
-  const evs = ['pointerdown', 'touchstart', 'keydown'];
+  /* Browser memblokir suara otomatis sebelum ada interaksi. Hanya event tertentu yang dihitung sebagai
+     interaksi valid (touchend/pointerup/click/keydown; touchstart & pointerdown sentuh TIDAK dihitung),
+     jadi pasang semuanya dan baru dilepas setelah musik benar-benar berhasil jalan. */
+  const evs = ['pointerup', 'touchend', 'mousedown', 'click', 'keydown'];
   function onGesture(e) {
     if (e.target.closest && e.target.closest('#musicBtn')) return;
-    removeGesture();
-    if (!userMuted && au.paused) tryPlay();
+    if (userMuted || !au.paused) return removeGesture();
+    tryPlay().then(ok => { if (ok !== false) removeGesture(); });
   }
   function removeGesture() { evs.forEach(ev => removeEventListener(ev, onGesture, true)); }
+  au.addEventListener('playing', removeGesture);
   if (!userMuted) {
     tryPlay().then(ok => { if (ok === false) evs.forEach(ev => addEventListener(ev, onGesture, true)); });
   }
