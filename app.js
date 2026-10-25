@@ -427,46 +427,55 @@ async function submitOrder(e) {
   btn.textContent = 'Mengirim...';
 
   try {
+    // Hanya kirim field yang relevan dengan mode pesanan (tanpa field kosong "-")
     const body = {
       access_key: WEB3FORMS_KEY,
       subject: `Pesanan Baru: ${o.customer.name} - ${rp(o.total)}`,
       from_name: 'Warung Pojok Mamah David',
       botcheck: '',
-
       Nama: o.customer.name,
       WhatsApp: o.customer.phone,
-      Mode: MODE_LABEL[o.customer.mode],
-      Alamat: o.customer.address || '-',
-      Angkatan: o.customer.angkatan || '-',
-      Jurusan: o.customer.jurusan || '-',
-      Kelas: o.customer.kelas || '-',
-      [o.customer.mode === 'ambil' ? 'Waktu_Ambil' : 'Waktu_Antar']: fmtSchedule(o.customer.date, o.customer.time),
-      Catatan: o.customer.note || '-',
-      Pembayaran: o.pay === 'cash' ? 'Cash' : 'Cashless',
-      Pesanan: o.items.map(i =>
-        `${i.qty}x ${i.name}` +
-        (i.sauces && i.sauces.length ? ` (Saos: ${i.sauces.join(', ')})` : '') +
-        (i.flavor ? ` (Rasa: ${i.flavor})` : '') +
-        (i.toppings && i.toppings.length ? ` (Topping: ${i.toppings.join(', ')})` : '') +
-        (i.addon ? ' (+ Nasi)' : '') +
-        ` = ${rp(i.price * i.qty)}`
-      ).join('\n'),
-      Subtotal: rp(o.subtotal),
-      Ongkir: o.customer.mode === 'antar' ? `Rp${RATE_PER_KM.toLocaleString('id-ID')} per km, dikonfirmasi penjual via WhatsApp` : o.customer.mode === 'kampus' ? (o.ongkir ? rp(o.ongkir) : 'Gratis') : '-',
-      Total: rp(o.total),
-      Waktu: new Date(o.createdAt).toLocaleString('id-ID'),
-      Detail: buildOrderText(o)
+      Mode: MODE_LABEL[o.customer.mode]
     };
+    if (o.customer.mode === 'antar') body.Alamat = o.customer.address;
+    if (o.customer.mode === 'kampus') body.Data_Kampus = `Angkatan ${o.customer.angkatan}, Prodi ${o.customer.jurusan}, Kelas ${o.customer.kelas}`;
+    body[o.customer.mode === 'ambil' ? 'Waktu_Ambil' : 'Waktu_Antar'] = fmtSchedule(o.customer.date, o.customer.time);
+    if (o.customer.note) body.Catatan = o.customer.note;
+    body.Pembayaran = o.pay === 'cash' ? 'Cash (bayar di tempat)' : 'Cashless';
+    body.Pesanan = o.items.map(i =>
+      `${i.qty}x ${i.name}` +
+      (i.sauces && i.sauces.length ? ` (Saos: ${i.sauces.join(', ')})` : '') +
+      (i.flavor ? ` (Rasa: ${i.flavor})` : '') +
+      (i.toppings && i.toppings.length ? ` (Topping: ${i.toppings.join(', ')})` : '') +
+      (i.addon ? ' (+ Nasi)' : '') +
+      ` = ${rp(i.price * i.qty)}`
+    ).join('\n');
+    body.Subtotal = rp(o.subtotal);
+    if (o.customer.mode === 'antar') body.Ongkir = `Rp${RATE_PER_KM.toLocaleString('id-ID')} per km, dikonfirmasi penjual via WhatsApp`;
+    if (o.customer.mode === 'kampus') body.Ongkir = o.ongkir ? rp(o.ongkir) : 'Gratis';
+    body.Total = rp(o.total);
+    body.Waktu_Order = new Date(o.createdAt).toLocaleString('id-ID');
+    body.message = buildOrderText(o);   // isi utama email
 
-    const res = await fetch('https://api.web3forms.com/submit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(body)
-    });
-
-    const data = await res.json().catch(() => ({}));
-    if (!res.ok || !data.success) {
-      throw new Error(data.message || `Gagal kirim (HTTP ${res.status})`);
+    // Kirim dengan batas waktu 15 detik; kalau gagal karena jaringan, coba sekali lagi
+    const send = async () => {
+      const ctrl = new AbortController(), to = setTimeout(() => ctrl.abort(), 15000);
+      try {
+        const res = await fetch('https://api.web3forms.com/submit', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+          body: JSON.stringify(body),
+          signal: ctrl.signal
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok || data.success !== true) throw new Error(data.message || `Gagal kirim (HTTP ${res.status})`);
+        return data;
+      } finally { clearTimeout(to); }
+    };
+    try { await send(); }
+    catch (err) {
+      if (err instanceof TypeError || err.name === 'AbortError') await send();   // masalah jaringan: ulangi sekali
+      else throw err;
     }
 
     save('wp_buyer', { name: o.customer.name, phone: o.customer.phone });
