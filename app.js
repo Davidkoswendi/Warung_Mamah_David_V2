@@ -304,7 +304,7 @@ function openCheckout() {
   const last = load('wp_buyer', null); if (last) { f.name.value = last.name; f.phone.value = last.phone; }
   const now = new Date(), pad = n => String(n).padStart(2, '0');
   const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
-  f.date.min = today; f.date.value = today;
+  f.date.value = today;
   f.time.value = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
   f.dataset.dtTouched = '';
   renderSummary();
@@ -383,18 +383,11 @@ async function submitOrder(e) {
     return;
   }
 
-  if (!f.dataset.dtTouched) {
+  // Tanggal/jam tidak pernah menghalangi pengiriman: kalau belum disentuh atau dikosongkan, pakai waktu sekarang
+  {
     const n = new Date(), p = x => String(x).padStart(2, '0');
-    f.date.value = `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
-    f.time.value = `${p(n.getHours())}:${p(n.getMinutes())}`;
-  }
-  if (!f.date.value || !f.time.value) {
-    toast('Isi tanggal dan jam pesanan', 'err');
-    return;
-  }
-  if (new Date(`${f.date.value}T${f.time.value}`).getTime() < Date.now() - 60000) {
-    toast('Tanggal/jam sudah lewat, pilih waktu yang akan datang', 'err');
-    return;
+    if (!f.dataset.dtTouched || !f.date.value) f.date.value = `${n.getFullYear()}-${p(n.getMonth() + 1)}-${p(n.getDate())}`;
+    if (!f.dataset.dtTouched || !f.time.value) f.time.value = `${p(n.getHours())}:${p(n.getMinutes())}`;
   }
 
   const o = {
