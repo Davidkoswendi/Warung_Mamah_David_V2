@@ -279,7 +279,7 @@
           <label>Nama kamu<input name="name" required placeholder="Contoh: Budi" autocomplete="name"></label>
           <label>No. HP / WhatsApp<input name="phone" required inputmode="tel" placeholder="08xxxxxxxxxx" autocomplete="tel"></label>
           <label>Cara pengambilan
-            <select name="mode" id="modeSel"><option value="ambil">Ambil di warung</option><option value="antar">Diantar</option><option value="kampus">Anter Kampus UPI Cibiru</option></select>
+            <select name="mode" id="modeSel"><option value="ambil">Ambil di warung</option><option value="antar">Diantar</option><option value="kampus">PO Kampus UPI Cibiru</option></select>
           </label>
           <div class="antar" id="antarWrap" hidden>
             <label>Alamat pengantaran<textarea name="address" rows="2" placeholder="Alamat lengkap" autocomplete="street-address"></textarea></label>
@@ -291,8 +291,18 @@
               <label>Kelas<input name="kelas" maxlength="20" placeholder="Contoh: 1C"></label>
             </div>
             <label>Prodi<input name="jurusan" maxlength="60" placeholder="Contoh: RPL"></label>
+            <div class="dt-row">
+              <label>Hari PO
+                <select name="kday" id="kampusDay">
+                  <option value="3">Rabu</option>
+                  <option value="4">Kamis</option>
+                  <option value="5">Jumat</option>
+                </select>
+              </label>
+              <label>Jam<input id="kampusTime" readonly tabindex="-1" aria-readonly="true"></label>
+            </div>
           </div>
-          <div class="dt-row">
+          <div class="dt-row" id="dtRow">
             <label id="dateLabel">Tanggal<input type="date" name="date" id="orderDate"></label>
             <label id="timeLabel">Jam<input type="time" name="time" id="orderTime"></label>
           </div>

@@ -18,8 +18,28 @@ const WEB3FORMS_KEY = '738e6f6e-0fc3-4def-8520-fddf4d24e0f0';
    ONGKIR
    ========================================================= */
 const RATE_PER_KM = 1500;   // hanya untuk keterangan; ongkir dihitung & dikonfirmasi penjual lewat WhatsApp
-const CAMPUS_FEE = 0;       // ongkir Anter Kampus UPI Cibiru
-const MODE_LABEL = { ambil: 'Ambil di warung', antar: 'Diantar', kampus: 'Anter Kampus UPI Cibiru' };
+const CAMPUS_FEE = 0;       // ongkir PO Kampus UPI Cibiru
+const MODE_LABEL = { ambil: 'Ambil di warung', antar: 'Diantar', kampus: 'PO Kampus UPI Cibiru' };
+
+/* =========================================================
+   JADWAL PO KAMPUS UPI CIBIRU (hanya Rabu, Kamis, Jumat)
+   ========================================================= */
+const KAMPUS_SLOTS = {
+  3: { name: 'Rabu',  start: '07:00', end: '13:20' },
+  4: { name: 'Kamis', start: '09:30', end: '14:40' },
+  5: { name: 'Jumat', start: '09:30', end: '16:20' }
+};
+const kampusRange = s => `${s.start.replace(':', '.')}–${s.end.replace(':', '.')}`;
+const hm = t => { const [h, m] = String(t).split(':').map(Number); return h * 60 + m; };
+/* tanggal Rabu/Kamis/Jumat terdekat yang jam layanannya belum lewat */
+function nextKampusDate(day) {
+  const s = KAMPUS_SLOTS[day], now = new Date();
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let add = (Number(day) - d.getDay() + 7) % 7;
+  if (add === 0 && now.getHours() * 60 + now.getMinutes() >= hm(s.end)) add = 7;
+  d.setDate(d.getDate() + add);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
 
 /* =========================================================
    MENU
@@ -300,7 +320,7 @@ function openCheckout() {
   if (!cart.length) return;
   closeM($('#m-cart'));
   const f = $('#checkoutForm'); f.reset();
-  $('#antarWrap').hidden = true; $('#kampusWrap').hidden = true; $('#qrBox').hidden = true;
+  $('#antarWrap').hidden = true; $('#kampusWrap').hidden = true; $('#dtRow').hidden = false; $('#qrBox').hidden = true;
   const last = load('wp_buyer', null); if (last) { f.name.value = last.name; f.phone.value = last.phone; }
   const now = new Date(), pad = n => String(n).padStart(2, '0');
   const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
@@ -324,9 +344,16 @@ function renderSummary() {
 const shipFee = mode => mode === 'kampus' ? CAMPUS_FEE : 0;
 const grandTotal = () => cartTotal() + shipFee($('#checkoutForm').mode.value);
 
+function updKampusDay() {
+  const s = KAMPUS_SLOTS[$('#kampusDay').value];
+  $('#kampusTime').value = kampusRange(s);   // jam tetap, tidak bisa diubah
+}
+
 function setMode(mode) {
   $('#antarWrap').hidden = mode !== 'antar';
   $('#kampusWrap').hidden = mode !== 'kampus';
+  $('#dtRow').hidden = mode === 'kampus';   // PO kampus tidak pakai tanggal bebas, hanya Rabu/Kamis/Jumat
+  if (mode === 'kampus') updKampusDay();
   renderSummary();
 }
 
@@ -334,7 +361,7 @@ function fmtSchedule(date, time) {
   const [y, m, d] = String(date).split('-').map(Number);
   const dt = new Date(y, (m || 1) - 1, d || 1);
   const ds = dt.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  return `${ds}, pukul ${String(time).replace(':', '.')}`;
+  return `${ds}, pukul ${String(time).replace(/:/g, '.')}`;
 }
 
 function buildOrderText(o) {
@@ -348,7 +375,7 @@ function buildOrderText(o) {
   if (o.customer.mode === 'antar') lines.push('ALAMAT: ' + o.customer.address);
   if (o.customer.mode === 'kampus') lines.push(`DATA KAMPUS: Angkatan ${o.customer.angkatan}, Jurusan ${o.customer.jurusan}, Kelas ${o.customer.kelas}`);
   if (o.customer.note) lines.push('CATATAN: ' + o.customer.note);
-  lines.push((o.customer.mode === 'ambil' ? 'WAKTU AMBIL: ' : 'WAKTU ANTAR: ') + fmtSchedule(o.customer.date, o.customer.time));
+  lines.push((o.customer.mode === 'ambil' ? 'WAKTU AMBIL: ' : o.customer.mode === 'kampus' ? 'JADWAL PO KAMPUS: ' : 'WAKTU ANTAR: ') + fmtSchedule(o.customer.date, o.customer.time));
   lines.push('PEMBAYARAN: ' + (o.pay === 'cash' ? 'Cash (bayar di tempat)' : 'Cashless'));
   lines.push('');
   lines.push('--- ITEM PESANAN ---');
@@ -383,6 +410,15 @@ async function submitOrder(e) {
     return;
   }
 
+  // PO Kampus: hanya Rabu/Kamis/Jumat, jam harus di dalam jam layanan hari itu
+  if (f.mode.value === 'kampus') {
+    const s = KAMPUS_SLOTS[f.kday.value];
+    if (!s) { toast('Pilih hari PO (Rabu, Kamis, atau Jumat)', 'err'); return; }
+    f.date.value = nextKampusDate(f.kday.value);
+    f.time.value = s.start;
+    f.dataset.dtTouched = '1';
+  }
+
   // Tanggal/jam tidak pernah menghalangi pengiriman: kalau belum disentuh atau dikosongkan, pakai waktu sekarang
   {
     const n = new Date(), p = x => String(x).padStart(2, '0');
@@ -396,7 +432,7 @@ async function submitOrder(e) {
       name: f.name.value.trim(),
       phone: f.phone.value.trim(),
       date: f.date.value,
-      time: f.time.value,
+      time: f.mode.value === 'kampus' ? kampusRange(KAMPUS_SLOTS[f.kday.value]) : f.time.value,   // PO kampus: jam tetap sesuai hari
       mode: f.mode.value,
       address: f.mode.value === 'antar' ? f.address.value.trim() : '',
       angkatan: f.mode.value === 'kampus' ? f.angkatan.value.trim() : '',
@@ -423,7 +459,7 @@ async function submitOrder(e) {
     // Hanya kirim field yang relevan dengan mode pesanan (tanpa field kosong "-")
     const body = {
       access_key: WEB3FORMS_KEY,
-      subject: `Pesanan Baru: ${o.customer.name} - ${rp(o.total)}`,
+      subject: `Pesanan Baru [${MODE_LABEL[o.customer.mode]}]: ${o.customer.name} - ${rp(o.total)}`,
       from_name: 'Warung Pojok Mamah David',
       botcheck: '',
       Nama: o.customer.name,
@@ -432,7 +468,7 @@ async function submitOrder(e) {
     };
     if (o.customer.mode === 'antar') body.Alamat = o.customer.address;
     if (o.customer.mode === 'kampus') body.Data_Kampus = `Angkatan ${o.customer.angkatan}, Prodi ${o.customer.jurusan}, Kelas ${o.customer.kelas}`;
-    body[o.customer.mode === 'ambil' ? 'Waktu_Ambil' : 'Waktu_Antar'] = fmtSchedule(o.customer.date, o.customer.time);
+    body[o.customer.mode === 'ambil' ? 'Waktu_Ambil' : o.customer.mode === 'kampus' ? 'Jadwal_PO_Kampus' : 'Waktu_Antar'] = fmtSchedule(o.customer.date, o.customer.time);
     if (o.customer.note) body.Catatan = o.customer.note;
     body.Pembayaran = o.pay === 'cash' ? 'Cash (bayar di tempat)' : 'Cashless';
     body.Pesanan = o.items.map(i =>
@@ -481,15 +517,17 @@ async function submitOrder(e) {
     $('#okTitle').textContent = first ? `Mantap, ${first}! Pesanan terkirim` : 'Pesanan terkirim!';
     $('#okPay').textContent = o.pay === 'cash' ? 'Cash (di tempat)' : 'Cashless';
     $('#okWhen').textContent = fmtSchedule(o.customer.date, o.customer.time);
-    $('#okWhenLabel').textContent = o.customer.mode === 'ambil' ? 'Waktu ambil' : 'Waktu antar';
+    $('#okWhenLabel').textContent = o.customer.mode === 'ambil' ? 'Waktu ambil' : o.customer.mode === 'kampus' ? 'Jadwal PO' : 'Waktu antar';
     $('#okWaBtn').onclick = () => {
       const wa = settings.phone.replace(/[^\d]/g, '').replace(/^0/, '62');
       const msg = encodeURIComponent(
         `Halo Warung Pojok Mamah David 👋\n\n` +
         `Saya sudah pesan lewat website:\n` +
         `Nama: ${o.customer.name}\n` +
+        `Cara: ${MODE_LABEL[o.customer.mode]}${o.customer.mode === 'kampus' ? ` (Angkatan ${o.customer.angkatan}, ${o.customer.jurusan}, Kelas ${o.customer.kelas})` : ''}\n` +
+        `${o.customer.mode === 'ambil' ? 'Diambil' : o.customer.mode === 'kampus' ? 'Jadwal PO' : 'Diantar'}: ${fmtSchedule(o.customer.date, o.customer.time)}\n` +
+        `Pesanan:\n${o.items.map(i => `- ${i.qty}x ${i.name}${i.sauces && i.sauces.length ? ' (Saos: ' + i.sauces.join(', ') + ')' : ''}${i.flavor ? ' (Rasa: ' + i.flavor + ')' : ''}${i.toppings && i.toppings.length ? ' (Topping: ' + i.toppings.join(', ') + ')' : ''}${i.addon ? ' (+ Nasi)' : ''}`).join('\n')}\n` +
         `Total: ${rp(o.total)}\n` +
-        `${o.customer.mode === 'ambil' ? 'Diambil' : 'Diantar'}${o.customer.mode === 'kampus' ? ' (Kampus UPI Cibiru)' : ''}: ${fmtSchedule(o.customer.date, o.customer.time)}\n` +
         `Pembayaran: ${o.pay === 'cash' ? 'Cash' : 'Cashless'}\n\n` +
         `Mohon dikonfirmasi ya. Terima kasih! 🙏`
       );
@@ -567,6 +605,7 @@ document.addEventListener('change', e => {
   if (t.closest('#m-topping')) updOpts();
   if (t.name === 'pay') $('#qrBox').hidden = t.value !== 'cashless';
   if (t.id === 'modeSel') setMode(t.value);
+  if (t.id === 'kampusDay') updKampusDay();
 });
 
 $('#topAdd').onclick = () => { addToCart(topItem.id, topSel, flavSel, $('#topAdd'), addonSel, sauceSel); closeM($('#m-topping')); };
@@ -588,7 +627,7 @@ const FAQ = [
   {
     q: 'Bisa diantar ke rumah?',
     k: 'antar delivery alamat ambil',
-    a: () => `Bisa. Pilih <b>Diantar</b> di formulir pemesanan, isi alamat lengkap. Ongkir Rp${RATE_PER_KM.toLocaleString('id-ID')} per km, dihitung dan dikonfirmasi penjual lewat WhatsApp. Mahasiswa UPI Cibiru bisa pilih <b>Anter Kampus UPI Cibiru</b>. Kalau mau ambil sendiri, pilih <b>Ambil di warung</b>. Detail pengantaran dikonfirmasi penjual lewat WhatsApp.`
+    a: () => `Bisa. Pilih <b>Diantar</b> di formulir pemesanan, isi alamat lengkap. Ongkir Rp${RATE_PER_KM.toLocaleString('id-ID')} per km, dihitung dan dikonfirmasi penjual lewat WhatsApp. Mahasiswa UPI Cibiru bisa pilih <b>PO Kampus UPI Cibiru</b> (pengantaran hari Rabu, Kamis, dan Jumat). Kalau mau ambil sendiri, pilih <b>Ambil di warung</b>. Detail pengantaran dikonfirmasi penjual lewat WhatsApp.`
   },
   {
     q: 'Bayarnya gimana?',
