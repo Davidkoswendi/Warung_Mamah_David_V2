@@ -17,29 +17,218 @@ const WEB3FORMS_KEY = '738e6f6e-0fc3-4def-8520-fddf4d24e0f0';
 /* =========================================================
    ONGKIR
    ========================================================= */
-const RATE_PER_KM = 1500;   // hanya untuk keterangan; ongkir dihitung & dikonfirmasi penjual lewat WhatsApp
-const CAMPUS_FEE = 0;       // ongkir PO Kampus UPI Cibiru
-const MODE_LABEL = { ambil: 'Ambil di warung', antar: 'Diantar', kampus: 'PO Kampus UPI Cibiru' };
+const RATE_PER_KM = 2000;   // ongkir per km (jarak rute jalan dari warung ke lokasi pembeli)
+const CAMPUS_FEE = 0;       // ongkir PO ke Kampus UPI Cibiru
+
+/* Jadwal PO Kampus UPI Cibiru: hari & jam FIX, pembeli hanya memilih hari. Ubah jam di sini kalau jadwal berubah. */
+const PO_SCHEDULE = {
+  Rabu:  '07.00–13.20',
+  Kamis: '09.30–14.40',
+  Jumat: '09.30–16.20'
+};
+const poText = hari => `Hari ${hari}, jam ${PO_SCHEDULE[hari]}`;
+
+/* Titik awal pengantaran (patokan: alamat Seblak Akur).
+   >>> PENTING: cek & ganti koordinat ini sesuai lokasi yang benar. <<<
+   Cara ambil: buka Google Maps, klik kanan di lokasi warung, klik angka koordinat paling atas (otomatis tersalin),
+   lalu tempel: angka pertama = lat, angka kedua = lng. */
+const STORE = { name: 'Warung Pojok Mamah David', lat: -6.961120347332004, lng: 107.63392063880788 }; 
+const MODE_LABEL = { ambil: 'Ambil di warung', antar: 'Diantar', kampus: 'PO ke Kampus UPI Cibiru' };
+
 
 /* =========================================================
-   JADWAL PO KAMPUS UPI CIBIRU (hanya Rabu, Kamis, Jumat)
+   PETA & HITUNG ONGKIR (Leaflet + OpenStreetMap, tanpa API key)
+   - cari alamat: Photon (cadangan: Nominatim)
+   - jarak rute jalan: OSRM (cadangan: garis lurus x 1,3)
    ========================================================= */
-const KAMPUS_SLOTS = {
-  3: { name: 'Rabu',  start: '07:00', end: '13:20' },
-  4: { name: 'Kamis', start: '09:30', end: '14:40' },
-  5: { name: 'Jumat', start: '09:30', end: '16:20' }
-};
-const kampusRange = s => `${s.start.replace(':', '.')}–${s.end.replace(':', '.')}`;
-const hm = t => { const [h, m] = String(t).split(':').map(Number); return h * 60 + m; };
-/* tanggal Rabu/Kamis/Jumat terdekat yang jam layanannya belum lewat */
-function nextKampusDate(day) {
-  const s = KAMPUS_SLOTS[day], now = new Date();
-  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  let add = (Number(day) - d.getDay() + 7) % 7;
-  if (add === 0 && now.getHours() * 60 + now.getMinutes() >= hm(s.end)) add = 7;
-  d.setDate(d.getDate() + add);
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const ship = { lat: null, lng: null, km: null, fee: 0, approx: false, busy: false };
+let shipMap = null, shipPin = null, shipRoute = null, routeSeq = 0, searchSeq = 0;
+
+const fmtKm = km => km.toLocaleString('id-ID', { minimumFractionDigits: 1, maximumFractionDigits: 1 });
+const shipText = () => ship.km != null
+  ? `${rp(ship.fee)} (${fmtKm(ship.km)} km x ${rp(RATE_PER_KM)})`
+  : `${rp(RATE_PER_KM)} per km, dikonfirmasi penjual via WhatsApp`;
+const mapsLink = () => `https://www.google.com/maps?q=${ship.lat.toFixed(6)},${ship.lng.toFixed(6)}`;
+
+function haversine(lat1, lng1, lat2, lng2) {
+  const R = 6371, toR = x => x * Math.PI / 180;
+  const dLat = toR(lat2 - lat1), dLng = toR(lng2 - lng1);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(toR(lat1)) * Math.cos(toR(lat2)) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
 }
+
+async function fetchJson(url, ms = 8000) {
+  const ctrl = new AbortController(), to = setTimeout(() => ctrl.abort(), ms);
+  try {
+    const r = await fetch(url, { signal: ctrl.signal, headers: { Accept: 'application/json' } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return await r.json();
+  } finally { clearTimeout(to); }
+}
+
+function renderShipInfo() {
+  const el = $('#shipInfo');
+  if (ship.busy) { el.textContent = 'Menghitung jarak…'; return; }
+  if (ship.km == null) { el.textContent = `Cari alamatmu atau ketuk peta. Ongkir dihitung otomatis dari jarak ke warung × ${rp(RATE_PER_KM)} per km.`; return; }
+  el.innerHTML = `Jarak <b>${fmtKm(ship.km)} km</b> × ${rp(RATE_PER_KM)} = ongkir <b>${rp(ship.fee)}</b>` +
+    (ship.approx ? '<br><small>Perkiraan (rute jalan belum bisa dimuat). Penjual akan mengonfirmasi lagi.</small>' : '');
+}
+
+function initMap() {
+  if (shipMap) return true;
+  if (typeof L === 'undefined') {
+    $('#shipMap').innerHTML = '<p class="map-fail">Peta tidak bisa dimuat. Periksa internet lalu muat ulang halaman. Kamu tetap bisa isi alamat di bawah, ongkir dikonfirmasi penjual.</p>';
+    return false;
+  }
+  shipMap = L.map('shipMap').setView([STORE.lat, STORE.lng], 14);
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19, attribution: '&copy; OpenStreetMap' }).addTo(shipMap);
+  L.marker([STORE.lat, STORE.lng], {
+    icon: L.divIcon({ className: '', html: '<span class="store-pin">🍲</span>', iconSize: [34, 34], iconAnchor: [17, 17] }),
+    keyboard: false
+  }).addTo(shipMap).bindTooltip('Warung (titik awal)', { direction: 'top' });
+  shipMap.on('click', e => setPoint(e.latlng.lat, e.latlng.lng, { reverse: true }));
+  return true;
+}
+
+function fillAddress(label) {
+  $('#addrSearch').value = label;
+  const ta = $('#checkoutForm').address;
+  if (!ta.dataset.touched) ta.value = label;
+}
+
+async function reverseGeocode(lat, lng) {
+  try {
+    const d = await fetchJson(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&zoom=18&lat=${lat}&lon=${lng}`);
+    if (d && d.display_name) fillAddress(d.display_name.split(', ').slice(0, 4).join(', '));
+  } catch { /* abaikan: pembeli bisa isi detail alamat manual */ }
+}
+
+function setPoint(lat, lng, { label = '', reverse = false } = {}) {
+  if (!initMap()) return;
+  ship.lat = lat; ship.lng = lng;
+  if (!shipPin) {
+    shipPin = L.marker([lat, lng], {
+      draggable: true, keyboard: false,
+      icon: L.divIcon({ className: '', html: '<span class="pin"></span>', iconSize: [28, 28], iconAnchor: [14, 34] })
+    }).addTo(shipMap);
+    shipPin.on('dragend', () => { const p = shipPin.getLatLng(); setPoint(p.lat, p.lng, { reverse: true }); });
+  } else shipPin.setLatLng([lat, lng]);
+  if (label) fillAddress(label); else if (reverse) reverseGeocode(lat, lng);
+  calcRoute();
+}
+
+async function calcRoute() {
+  const seq = ++routeSeq;
+  ship.busy = true; ship.km = null; ship.fee = 0;
+  renderShipInfo(); renderSummary();
+  let km, coords = null, approx = false;
+  try {
+    const d = await fetchJson(`https://router.project-osrm.org/route/v1/driving/${STORE.lng},${STORE.lat};${ship.lng},${ship.lat}?overview=full&geometries=geojson`, 10000);
+    const r = d.routes && d.routes[0];
+    if (!r) throw new Error('no route');
+    km = r.distance / 1000;
+    coords = r.geometry.coordinates.map(c => [c[1], c[0]]);
+  } catch {
+    km = haversine(STORE.lat, STORE.lng, ship.lat, ship.lng) * 1.3; approx = true;
+  }
+  if (seq !== routeSeq) return;   // ada titik yang lebih baru
+  ship.km = Math.max(0.1, Math.round(km * 10) / 10);
+  ship.fee = Math.round(ship.km * RATE_PER_KM);
+  ship.approx = approx; ship.busy = false;
+  if (shipRoute) { shipMap.removeLayer(shipRoute); shipRoute = null; }
+  if (coords) {
+    shipRoute = L.polyline(coords, { color: '#d62718', weight: 5, opacity: .85 }).addTo(shipMap);
+    shipMap.fitBounds(shipRoute.getBounds(), { padding: [30, 30] });
+  } else {
+    shipMap.fitBounds([[STORE.lat, STORE.lng], [ship.lat, ship.lng]], { padding: [30, 30] });
+  }
+  renderShipInfo(); renderSummary();
+}
+
+function resetShip() {
+  routeSeq++; searchSeq++;
+  Object.assign(ship, { lat: null, lng: null, km: null, fee: 0, approx: false, busy: false });
+  if (shipMap) {
+    if (shipPin) { shipMap.removeLayer(shipPin); shipPin = null; }
+    if (shipRoute) { shipMap.removeLayer(shipRoute); shipRoute = null; }
+    shipMap.setView([STORE.lat, STORE.lng], 14);
+  }
+  const ta = $('#checkoutForm').address; if (ta) delete ta.dataset.touched;
+  hideSugg(); renderShipInfo();
+}
+
+/* ---------- pencarian alamat ---------- */
+const suggEl = $('#addrSugg'), searchEl = $('#addrSearch');
+let hits = [], activeIdx = -1, searchTimer;
+
+function hideSugg() { suggEl.hidden = true; suggEl.innerHTML = ''; hits = []; activeIdx = -1; searchEl.setAttribute('aria-expanded', 'false'); }
+function showSuggMsg(msg) {
+  suggEl.innerHTML = ''; const li = document.createElement('li'); li.className = 'msg'; li.textContent = msg;
+  suggEl.appendChild(li); suggEl.hidden = false; searchEl.setAttribute('aria-expanded', 'true');
+}
+function renderSugg() {
+  if (!hits.length) { showSuggMsg('Alamat tidak ditemukan. Coba kata lain atau ketuk langsung di peta.'); return; }
+  suggEl.innerHTML = '';
+  hits.forEach((h, i) => {
+    const li = document.createElement('li'); li.setAttribute('role', 'option'); li.textContent = h.label;
+    li.addEventListener('mousedown', e => { e.preventDefault(); pickSugg(i); });
+    suggEl.appendChild(li);
+  });
+  suggEl.hidden = false; searchEl.setAttribute('aria-expanded', 'true'); activeIdx = -1;
+}
+function markActive() {
+  [...suggEl.children].forEach((li, i) => li.setAttribute('aria-selected', i === activeIdx ? 'true' : 'false'));
+  const li = suggEl.children[activeIdx]; if (li && li.scrollIntoView) li.scrollIntoView({ block: 'nearest' });
+}
+function pickSugg(i) {
+  const h = hits[i]; if (!h) return;
+  hideSugg(); setPoint(h.lat, h.lng, { label: h.label });
+}
+
+async function searchPlaces(q) {
+  try {
+    const d = await fetchJson(`https://photon.komoot.io/api/?limit=6&lat=${STORE.lat}&lon=${STORE.lng}&q=${encodeURIComponent(q)}`);
+    const out = (d.features || []).filter(f => String(f.properties.countrycode || '').toUpperCase() === 'ID').map(f => {
+      const p = f.properties, street = [p.street, p.housenumber].filter(Boolean).join(' ');
+      const parts = [p.name, street, p.district, p.city || p.county, p.state].filter(Boolean);
+      return { label: [...new Set(parts)].join(', '), lat: f.geometry.coordinates[1], lng: f.geometry.coordinates[0] };
+    });
+    if (out.length) return out;
+  } catch { /* lanjut ke cadangan */ }
+  const d = await fetchJson(`https://nominatim.openstreetmap.org/search?format=jsonv2&limit=6&countrycodes=id&q=${encodeURIComponent(q)}`);
+  return d.map(x => ({ label: x.display_name.split(', ').slice(0, 4).join(', '), lat: +x.lat, lng: +x.lon }));
+}
+
+searchEl.addEventListener('input', () => {
+  clearTimeout(searchTimer);
+  const q = searchEl.value.trim();
+  if (q.length < 3) { hideSugg(); return; }
+  searchTimer = setTimeout(async () => {
+    const seq = ++searchSeq; showSuggMsg('Mencari…');
+    try { const r = await searchPlaces(q); if (seq !== searchSeq) return; hits = r; renderSugg(); }
+    catch { if (seq === searchSeq) showSuggMsg('Pencarian gagal. Ketuk peta untuk memilih lokasi.'); }
+  }, 450);
+});
+searchEl.addEventListener('keydown', e => {
+  if (e.key === 'Enter') { e.preventDefault(); if (hits.length) pickSugg(activeIdx >= 0 ? activeIdx : 0); return; }   // jangan kirim formulir
+  if (e.key === 'Escape') { hideSugg(); return; }
+  if ((e.key === 'ArrowDown' || e.key === 'ArrowUp') && hits.length) {
+    e.preventDefault();
+    activeIdx = (activeIdx + (e.key === 'ArrowDown' ? 1 : -1) + hits.length) % hits.length; markActive();
+  }
+});
+searchEl.addEventListener('blur', () => setTimeout(hideSugg, 150));
+
+$('#btnMyLoc').addEventListener('click', () => {
+  if (!navigator.geolocation) { toast('Browser tidak mendukung lokasi', 'err'); return; }
+  toast('Mencari lokasimu…');
+  navigator.geolocation.getCurrentPosition(
+    p => { setPoint(p.coords.latitude, p.coords.longitude, { reverse: true }); },
+    () => toast('Lokasi tidak bisa diakses. Cari alamat atau ketuk peta.', 'err'),
+    { enableHighAccuracy: true, timeout: 10000 }
+  );
+});
+$('#checkoutForm').address.addEventListener('input', e => { e.target.dataset.touched = '1'; });
 
 /* =========================================================
    MENU
@@ -320,7 +509,8 @@ function openCheckout() {
   if (!cart.length) return;
   closeM($('#m-cart'));
   const f = $('#checkoutForm'); f.reset();
-  $('#antarWrap').hidden = true; $('#kampusWrap').hidden = true; $('#dtRow').hidden = false; $('#qrBox').hidden = true;
+  $('#antarWrap').hidden = true; $('#kampusWrap').hidden = true; $('#dtRow').hidden = false; $('#qrBox').hidden = true; updPoJam();
+  resetShip();
   const last = load('wp_buyer', null); if (last) { f.name.value = last.name; f.phone.value = last.phone; }
   const now = new Date(), pad = n => String(n).padStart(2, '0');
   const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
@@ -334,26 +524,31 @@ function openCheckout() {
 /* ---------- ringkasan + ongkir ---------- */
 function renderSummary() {
   const mode = $('#checkoutForm').mode.value;
-  const ship = mode === 'kampus' ? `<div class="ln"><span>Ongkir <small>(Kampus UPI Cibiru)</small></span><span>${CAMPUS_FEE ? rp(CAMPUS_FEE) : 'Gratis'}</span></div>` : '';
+  let shipLn = '';
+  if (mode === 'kampus') shipLn = `<div class="ln"><span>Ongkir <small>(PO Kampus UPI Cibiru)</small></span><span>${CAMPUS_FEE ? rp(CAMPUS_FEE) : 'Gratis'}</span></div>`;
+  else if (mode === 'antar') shipLn = ship.km != null
+    ? `<div class="ln"><span>Ongkir <small>(${fmtKm(ship.km)} km × ${rp(RATE_PER_KM)})</small></span><span>${rp(ship.fee)}</span></div>`
+    : `<div class="ln"><span>Ongkir</span><span><small>${ship.busy ? 'menghitung…' : 'pilih lokasi di peta'}</small></span></div>`;
   $('#sumBox').innerHTML = '<b>Ringkasan</b>' + cart.map(c => {
     const m = menu.find(x => x.id === c.id);
     return `<div class="ln"><span>${c.qty}× ${esc(m.name)}${optText(c) ? ` <small>(${esc(optText(c))})</small>` : ''}</span><span>${rp(itemPrice(c) * c.qty)}</span></div>`;
-  }).join('') + ship + `<div class="ln tot"><span>Total</span><span>${rp(grandTotal())}</span></div>`;
+  }).join('') + shipLn + `<div class="ln tot"><span>Total</span><span>${rp(grandTotal())}</span></div>`;
 }
 
-const shipFee = mode => mode === 'kampus' ? CAMPUS_FEE : 0;
+const shipFee = mode => mode === 'kampus' ? CAMPUS_FEE : mode === 'antar' ? ship.fee : 0;
 const grandTotal = () => cartTotal() + shipFee($('#checkoutForm').mode.value);
 
-function updKampusDay() {
-  const s = KAMPUS_SLOTS[$('#kampusDay').value];
-  $('#kampusTime').value = kampusRange(s);   // jam tetap, tidak bisa diubah
-}
+function updPoJam() { $('#jamPO').value = PO_SCHEDULE[$('#hariSel').value] || ''; }
 
 function setMode(mode) {
   $('#antarWrap').hidden = mode !== 'antar';
   $('#kampusWrap').hidden = mode !== 'kampus';
-  $('#dtRow').hidden = mode === 'kampus';   // PO kampus tidak pakai tanggal bebas, hanya Rabu/Kamis/Jumat
-  if (mode === 'kampus') updKampusDay();
+  $('#dtRow').hidden = mode === 'kampus';   // PO kampus: tanggal & jam bebas diganti Hari PO + jam tetap
+  if (mode === 'kampus') updPoJam();
+  if (mode === 'antar' && initMap()) {
+    const fix = () => { shipMap.invalidateSize(); if (ship.lat == null) shipMap.setView([STORE.lat, STORE.lng], 14); };
+    requestAnimationFrame(fix); setTimeout(fix, 320);
+  }
   renderSummary();
 }
 
@@ -361,8 +556,11 @@ function fmtSchedule(date, time) {
   const [y, m, d] = String(date).split('-').map(Number);
   const dt = new Date(y, (m || 1) - 1, d || 1);
   const ds = dt.toLocaleDateString('id-ID', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' });
-  return `${ds}, pukul ${String(time).replace(/:/g, '.')}`;
+  return `${ds}, pukul ${String(time).replace(':', '.')}`;
 }
+
+/* teks jadwal: PO kampus = hari + jam tetap; lainnya = tanggal & jam pilihan pembeli */
+const whenText = c => c.mode === 'kampus' ? poText(c.hari) : fmtSchedule(c.date, c.time);
 
 function buildOrderText(o) {
   const lines = [];
@@ -372,10 +570,14 @@ function buildOrderText(o) {
   lines.push('NAMA: ' + o.customer.name);
   lines.push('HP/WA: ' + o.customer.phone);
   lines.push('MODE: ' + MODE_LABEL[o.customer.mode]);
-  if (o.customer.mode === 'antar') lines.push('ALAMAT: ' + o.customer.address);
-  if (o.customer.mode === 'kampus') lines.push(`DATA KAMPUS: Angkatan ${o.customer.angkatan}, Jurusan ${o.customer.jurusan}, Kelas ${o.customer.kelas}`);
+  if (o.customer.mode === 'antar') {
+    lines.push('ALAMAT: ' + o.customer.address);
+    if (o.customer.mapsUrl) lines.push('TITIK PETA: ' + o.customer.mapsUrl);
+    if (o.customer.km != null) lines.push('JARAK: ' + fmtKm(o.customer.km) + ' km' + (o.customer.kmApprox ? ' (perkiraan)' : ''));
+  }
+  if (o.customer.mode === 'kampus') lines.push(`DATA KAMPUS: Angkatan ${o.customer.angkatan}, Prodi ${o.customer.jurusan}, Kelas ${o.customer.kelas}`);
   if (o.customer.note) lines.push('CATATAN: ' + o.customer.note);
-  lines.push((o.customer.mode === 'ambil' ? 'WAKTU AMBIL: ' : o.customer.mode === 'kampus' ? 'JADWAL PO KAMPUS: ' : 'WAKTU ANTAR: ') + fmtSchedule(o.customer.date, o.customer.time));
+  lines.push((o.customer.mode === 'kampus' ? 'JADWAL PO: ' : o.customer.mode === 'ambil' ? 'WAKTU AMBIL: ' : 'WAKTU ANTAR: ') + whenText(o.customer));
   lines.push('PEMBAYARAN: ' + (o.pay === 'cash' ? 'Cash (bayar di tempat)' : 'Cashless'));
   lines.push('');
   lines.push('--- ITEM PESANAN ---');
@@ -384,7 +586,7 @@ function buildOrderText(o) {
   });
   lines.push('');
   lines.push('SUBTOTAL: ' + rp(o.subtotal));
-  if (o.customer.mode === 'antar') lines.push(`ONGKIR: Rp${RATE_PER_KM.toLocaleString('id-ID')} per km, dikonfirmasi penjual via WhatsApp`);
+  if (o.customer.mode === 'antar') lines.push('ONGKIR: ' + shipText());
   if (o.customer.mode === 'kampus') lines.push('ONGKIR: ' + (o.ongkir ? rp(o.ongkir) : 'Gratis'));
   lines.push('TOTAL: ' + rp(o.total));
   lines.push('');
@@ -401,23 +603,17 @@ async function submitOrder(e) {
     return;
   }
 
-  if (f.mode.value === 'antar' && !f.address.value.trim()) {
-    toast('Isi alamat pengantaran', 'err');
-    return;
+  if (f.mode.value === 'antar') {
+    if (shipMap && ship.lat == null) { toast('Pilih lokasi pengantaran di peta', 'err'); return; }
+    if (ship.busy) { toast('Tunggu sebentar, jarak sedang dihitung', 'err'); return; }
+    if (!f.address.value.trim()) { toast('Isi alamat pengantaran', 'err'); return; }
   }
   if (f.mode.value === 'kampus' && !(f.angkatan.value.trim() && f.jurusan.value.trim() && f.kelas.value.trim())) {
     toast('Isi angkatan, jurusan, dan kelas', 'err');
     return;
   }
 
-  // PO Kampus: hanya Rabu/Kamis/Jumat, jam harus di dalam jam layanan hari itu
-  if (f.mode.value === 'kampus') {
-    const s = KAMPUS_SLOTS[f.kday.value];
-    if (!s) { toast('Pilih hari PO (Rabu, Kamis, atau Jumat)', 'err'); return; }
-    f.date.value = nextKampusDate(f.kday.value);
-    f.time.value = s.start;
-    f.dataset.dtTouched = '1';
-  }
+  if (f.mode.value === 'kampus' && !PO_SCHEDULE[f.hari.value]) { toast('Pilih hari PO: Rabu, Kamis, atau Jumat', 'err'); return; }
 
   // Tanggal/jam tidak pernah menghalangi pengiriman: kalau belum disentuh atau dikosongkan, pakai waktu sekarang
   {
@@ -432,9 +628,13 @@ async function submitOrder(e) {
       name: f.name.value.trim(),
       phone: f.phone.value.trim(),
       date: f.date.value,
-      time: f.mode.value === 'kampus' ? kampusRange(KAMPUS_SLOTS[f.kday.value]) : f.time.value,   // PO kampus: jam tetap sesuai hari
+      time: f.time.value,
+      hari: f.mode.value === 'kampus' ? f.hari.value : '',   // jam PO diambil dari PO_SCHEDULE, bukan dari input
       mode: f.mode.value,
       address: f.mode.value === 'antar' ? f.address.value.trim() : '',
+      mapsUrl: f.mode.value === 'antar' && ship.lat != null ? mapsLink() : '',
+      km: f.mode.value === 'antar' ? ship.km : null,
+      kmApprox: f.mode.value === 'antar' && ship.approx,
       angkatan: f.mode.value === 'kampus' ? f.angkatan.value.trim() : '',
       jurusan: f.mode.value === 'kampus' ? f.jurusan.value.trim() : '',
       kelas: f.mode.value === 'kampus' ? f.kelas.value.trim() : '',
@@ -446,7 +646,7 @@ async function submitOrder(e) {
       return { name: m.name, qty: c.qty, price: itemPrice(c), toppings: c.toppings, flavor: c.flavor || '', sauces: c.sauces || [], addon: !!c.addon };
     }),
     subtotal: cartTotal(),
-    ongkir: f.mode.value === 'kampus' ? CAMPUS_FEE : 0,
+    ongkir: shipFee(f.mode.value),
     total: grandTotal(),
     pay: f.pay.value
   };
@@ -459,16 +659,21 @@ async function submitOrder(e) {
     // Hanya kirim field yang relevan dengan mode pesanan (tanpa field kosong "-")
     const body = {
       access_key: WEB3FORMS_KEY,
-      subject: `Pesanan Baru [${MODE_LABEL[o.customer.mode]}]: ${o.customer.name} - ${rp(o.total)}`,
+      subject: `${o.customer.mode === 'kampus' ? '[PO Kampus UPI Cibiru - ' + o.customer.hari + '] ' : ''}Pesanan Baru: ${o.customer.name} - ${rp(o.total)}`,
       from_name: 'Warung Pojok Mamah David',
       botcheck: '',
       Nama: o.customer.name,
       WhatsApp: o.customer.phone,
       Mode: MODE_LABEL[o.customer.mode]
     };
-    if (o.customer.mode === 'antar') body.Alamat = o.customer.address;
+    if (o.customer.mode === 'antar') {
+      body.Alamat = o.customer.address;
+      if (o.customer.mapsUrl) body.Titik_Peta = o.customer.mapsUrl;
+      if (o.customer.km != null) body.Jarak = fmtKm(o.customer.km) + ' km' + (o.customer.kmApprox ? ' (perkiraan)' : '');
+    }
     if (o.customer.mode === 'kampus') body.Data_Kampus = `Angkatan ${o.customer.angkatan}, Prodi ${o.customer.jurusan}, Kelas ${o.customer.kelas}`;
-    body[o.customer.mode === 'ambil' ? 'Waktu_Ambil' : o.customer.mode === 'kampus' ? 'Jadwal_PO_Kampus' : 'Waktu_Antar'] = fmtSchedule(o.customer.date, o.customer.time);
+    if (o.customer.mode === 'kampus') { body.Hari_PO = o.customer.hari; body.Jam_PO = PO_SCHEDULE[o.customer.hari]; }
+    else body[o.customer.mode === 'ambil' ? 'Waktu_Ambil' : 'Waktu_Antar'] = fmtSchedule(o.customer.date, o.customer.time);
     if (o.customer.note) body.Catatan = o.customer.note;
     body.Pembayaran = o.pay === 'cash' ? 'Cash (bayar di tempat)' : 'Cashless';
     body.Pesanan = o.items.map(i =>
@@ -480,7 +685,7 @@ async function submitOrder(e) {
       ` = ${rp(i.price * i.qty)}`
     ).join('\n');
     body.Subtotal = rp(o.subtotal);
-    if (o.customer.mode === 'antar') body.Ongkir = `Rp${RATE_PER_KM.toLocaleString('id-ID')} per km, dikonfirmasi penjual via WhatsApp`;
+    if (o.customer.mode === 'antar') body.Ongkir = shipText();
     if (o.customer.mode === 'kampus') body.Ongkir = o.ongkir ? rp(o.ongkir) : 'Gratis';
     body.Total = rp(o.total);
     body.Waktu_Order = new Date(o.createdAt).toLocaleString('id-ID');
@@ -516,18 +721,16 @@ async function submitOrder(e) {
     const first = (o.customer.name || '').trim().split(/\s+/)[0];
     $('#okTitle').textContent = first ? `Mantap, ${first}! Pesanan terkirim` : 'Pesanan terkirim!';
     $('#okPay').textContent = o.pay === 'cash' ? 'Cash (di tempat)' : 'Cashless';
-    $('#okWhen').textContent = fmtSchedule(o.customer.date, o.customer.time);
-    $('#okWhenLabel').textContent = o.customer.mode === 'ambil' ? 'Waktu ambil' : o.customer.mode === 'kampus' ? 'Jadwal PO' : 'Waktu antar';
+    $('#okWhen').textContent = whenText(o.customer);
+    $('#okWhenLabel').textContent = o.customer.mode === 'kampus' ? 'Jadwal PO' : o.customer.mode === 'ambil' ? 'Waktu ambil' : 'Waktu antar';
     $('#okWaBtn').onclick = () => {
       const wa = settings.phone.replace(/[^\d]/g, '').replace(/^0/, '62');
       const msg = encodeURIComponent(
         `Halo Warung Pojok Mamah David 👋\n\n` +
         `Saya sudah pesan lewat website:\n` +
         `Nama: ${o.customer.name}\n` +
-        `Cara: ${MODE_LABEL[o.customer.mode]}${o.customer.mode === 'kampus' ? ` (Angkatan ${o.customer.angkatan}, ${o.customer.jurusan}, Kelas ${o.customer.kelas})` : ''}\n` +
-        `${o.customer.mode === 'ambil' ? 'Diambil' : o.customer.mode === 'kampus' ? 'Jadwal PO' : 'Diantar'}: ${fmtSchedule(o.customer.date, o.customer.time)}\n` +
-        `Pesanan:\n${o.items.map(i => `- ${i.qty}x ${i.name}${i.sauces && i.sauces.length ? ' (Saos: ' + i.sauces.join(', ') + ')' : ''}${i.flavor ? ' (Rasa: ' + i.flavor + ')' : ''}${i.toppings && i.toppings.length ? ' (Topping: ' + i.toppings.join(', ') + ')' : ''}${i.addon ? ' (+ Nasi)' : ''}`).join('\n')}\n` +
         `Total: ${rp(o.total)}\n` +
+        `${o.customer.mode === 'kampus' ? 'PO Kampus UPI Cibiru' : o.customer.mode === 'ambil' ? 'Diambil' : 'Diantar'}: ${whenText(o.customer)}\n` +
         `Pembayaran: ${o.pay === 'cash' ? 'Cash' : 'Cashless'}\n\n` +
         `Mohon dikonfirmasi ya. Terima kasih! 🙏`
       );
@@ -605,7 +808,7 @@ document.addEventListener('change', e => {
   if (t.closest('#m-topping')) updOpts();
   if (t.name === 'pay') $('#qrBox').hidden = t.value !== 'cashless';
   if (t.id === 'modeSel') setMode(t.value);
-  if (t.id === 'kampusDay') updKampusDay();
+  if (t.id === 'hariSel') updPoJam();
 });
 
 $('#topAdd').onclick = () => { addToCart(topItem.id, topSel, flavSel, $('#topAdd'), addonSel, sauceSel); closeM($('#m-topping')); };
@@ -627,7 +830,7 @@ const FAQ = [
   {
     q: 'Bisa diantar ke rumah?',
     k: 'antar delivery alamat ambil',
-    a: () => `Bisa. Pilih <b>Diantar</b> di formulir pemesanan, isi alamat lengkap. Ongkir Rp${RATE_PER_KM.toLocaleString('id-ID')} per km, dihitung dan dikonfirmasi penjual lewat WhatsApp. Mahasiswa UPI Cibiru bisa pilih <b>PO Kampus UPI Cibiru</b> (pengantaran hari Rabu, Kamis, dan Jumat). Kalau mau ambil sendiri, pilih <b>Ambil di warung</b>. Detail pengantaran dikonfirmasi penjual lewat WhatsApp.`
+    a: () => `Bisa. Pilih <b>Diantar</b> di formulir pemesanan, cari alamatmu atau tandai di peta. Ongkir Rp${RATE_PER_KM.toLocaleString('id-ID')} per km, dihitung otomatis dari jarak warung ke lokasimu dan dikonfirmasi penjual lewat WhatsApp. Mahasiswa UPI Cibiru bisa pilih <b>PO ke Kampus UPI Cibiru</b> (Rabu 07.00–13.20, Kamis 09.30–14.40, Jumat 09.30–16.20). Kalau mau ambil sendiri, pilih <b>Ambil di warung</b>. Detail pengantaran dikonfirmasi penjual lewat WhatsApp.`
   },
   {
     q: 'Bayarnya gimana?',

@@ -7,6 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:wght@600;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
@@ -279,11 +280,25 @@
           <label>Nama kamu<input name="name" required placeholder="Contoh: Budi" autocomplete="name"></label>
           <label>No. HP / WhatsApp<input name="phone" required inputmode="tel" placeholder="08xxxxxxxxxx" autocomplete="tel"></label>
           <label>Cara pengambilan
-            <select name="mode" id="modeSel"><option value="ambil">Ambil di warung</option><option value="antar">Diantar</option><option value="kampus">PO Kampus UPI Cibiru</option></select>
+            <select name="mode" id="modeSel"><option value="ambil">Ambil di warung</option><option value="antar">Diantar</option><option value="kampus">PO ke Kampus UPI Cibiru</option></select>
           </label>
           <div class="antar" id="antarWrap" hidden>
-            <label>Alamat pengantaran<textarea name="address" rows="2" placeholder="Alamat lengkap" autocomplete="street-address"></textarea></label>
-            <div class="card ship-info" id="shipInfo">Ongkir Rp1.500 per km, akan dihitung &amp; dikonfirmasi penjual lewat WhatsApp.</div>
+            <div class="addr-search">
+              <label>Cari alamat pengantaran
+                <input type="search" id="addrSearch" placeholder="Ketik nama jalan, gang, atau tempat…" autocomplete="off" role="combobox" aria-expanded="false" aria-controls="addrSugg" aria-autocomplete="list">
+              </label>
+              <ul class="addr-sugg" id="addrSugg" role="listbox" hidden></ul>
+            </div>
+            <div class="map-box">
+              <div class="ship-map" id="shipMap" role="application" aria-label="Peta lokasi pengantaran"></div>
+              <button type="button" class="btn light sm map-loc" id="btnMyLoc">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8zm8.94 3A9 9 0 0 0 13 3.06V1h-2v2.06A9 9 0 0 0 3.06 11H1v2h2.06A9 9 0 0 0 11 20.94V23h2v-2.06A9 9 0 0 0 20.94 13H23v-2h-2.06zM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14z"/></svg>
+                Lokasi saya
+              </button>
+            </div>
+            <p class="muted map-tip">Ketuk peta atau geser pin merah untuk menyesuaikan titik antar.</p>
+            <label>Detail alamat / patokan<textarea name="address" rows="2" placeholder="Contoh: rumah pagar hijau, samping masjid" autocomplete="street-address"></textarea></label>
+            <div class="card ship-info" id="shipInfo">Cari alamatmu atau ketuk peta. Ongkir dihitung otomatis dari jarak ke warung × Rp2.000 per km.</div>
           </div>
           <div class="kampus" id="kampusWrap" hidden>
             <div class="dt-row">
@@ -293,13 +308,9 @@
             <label>Prodi<input name="jurusan" maxlength="60" placeholder="Contoh: RPL"></label>
             <div class="dt-row">
               <label>Hari PO
-                <select name="kday" id="kampusDay">
-                  <option value="3">Rabu</option>
-                  <option value="4">Kamis</option>
-                  <option value="5">Jumat</option>
-                </select>
+                <select name="hari" id="hariSel"><option value="Rabu">Rabu</option><option value="Kamis">Kamis</option><option value="Jumat">Jumat</option></select>
               </label>
-              <label>Jam<input id="kampusTime" readonly tabindex="-1" aria-readonly="true"></label>
+              <label>Jam<input name="jam" id="jamPO" readonly tabindex="-1" aria-readonly="true"></label>
             </div>
           </div>
           <div class="dt-row" id="dtRow">
@@ -360,6 +371,7 @@
 </button>
 
 <div class="toast" id="toast" role="status" aria-live="polite"></div>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

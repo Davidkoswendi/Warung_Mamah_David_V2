@@ -763,3 +763,20 @@ html:has(.modal.open,.drawer.open) body{overflow:hidden}
 .ship-info{background:#fffdf5;border-style:dashed;font-size:.88rem;line-height:1.45;padding:10px 12px}
 /* pilihan saos yang sudah mencapai batas maksimal */
 .top:has(input:disabled){opacity:.45;cursor:not-allowed}
+
+/* ---------- peta pengantaran ---------- */
+.addr-search{position:relative}
+.addr-sugg{position:absolute;left:0;right:0;top:100%;margin:4px 0 0;padding:6px;list-style:none;background:#fff;border:1.5px solid var(--line);border-radius:14px;box-shadow:var(--sh);z-index:30;max-height:240px;overflow:auto}
+.addr-sugg li{padding:10px 12px;border-radius:10px;cursor:pointer;font-size:.88rem;line-height:1.35}
+.addr-sugg li:hover,.addr-sugg li[aria-selected="true"]{background:#fff0ec}
+.addr-sugg li.msg{cursor:default;color:var(--muted)}.addr-sugg li.msg:hover{background:none}
+.map-box{position:relative;isolation:isolate;border-radius:16px;overflow:hidden;border:1.5px solid var(--line)}
+.ship-map{height:260px;width:100%;background:#efe6d6}
+.map-loc{position:absolute;left:10px;bottom:22px;z-index:1000;box-shadow:0 4px 12px rgba(0,0,0,.25)}
+.map-tip{font-size:.8rem;margin:-4px 0 0}
+.map-fail{padding:18px;font-size:.85rem;color:var(--muted);line-height:1.45}
+.ship-info small{color:var(--muted)}
+.pin{display:block;width:28px;height:28px;border-radius:50% 50% 50% 0;background:var(--chili);border:3px solid #fff;box-shadow:0 3px 8px rgba(0,0,0,.4);transform:rotate(-45deg);position:relative}
+.pin::after{content:"";position:absolute;left:50%;top:50%;width:8px;height:8px;margin:-4px 0 0 -4px;border-radius:50%;background:#fff}
+.store-pin{display:grid;place-items:center;width:34px;height:34px;border-radius:50%;background:var(--sun);border:3px solid var(--night);box-shadow:0 3px 8px rgba(0,0,0,.35);font-size:17px;line-height:1}
+.leaflet-container{font:inherit}input[readonly]{cursor:default;caret-color:transparent}
